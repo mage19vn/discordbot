@@ -8,8 +8,8 @@ import requests
 import asyncio
 
 # Khuyến cáo: Nên dùng os.environ.get trên hosting thay vì dán thẳng Key vào code
-GROQ_API_KEY = os.environ.get("GROQ_KEY")
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT")
+GROQ_API_KEY = os.environ.get("GROQ_KEY").strip()
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT").strip()
 
 intents = discord.Intents.default()
 intents.message_content = True
