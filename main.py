@@ -35,7 +35,7 @@ vietnamese_dict = set()
 used = set()
 print("Đang tải từ điển tiếng Việt vào bộ nhớ...")
 
-url = "https://raw.githubusercontent.com/duyet/vietnamese-wordlist/master/Viet39K.txt"
+url = "https://raw.githubusercontent.com/duyet/vietnamese-wordlist/master/Viet74K.txt"
 
 try:
     response = requests.get(url, timeout=10)
