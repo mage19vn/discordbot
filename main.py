@@ -9,6 +9,7 @@ import os
 import requests
 import asyncio
 import redis
+import json
 
 # Khuyến cáo: Nên dùng os.environ.get trên hosting thay vì dán thẳng Key vào code
 GROQ_API_KEY = os.environ.get("GROQ_KEY").strip()
@@ -35,7 +36,7 @@ vietnamese_dict = set()
 used = set()
 print("Đang tải từ điển tiếng Việt vào bộ nhớ...")
 
-url = "https://raw.githubusercontent.com/undertheseanlp/dictionary/master/dictionary/words.txt"
+url_uts = "https://raw.githubusercontent.com/undertheseanlp/dictionary/master/dictionary/words.txt"
 
 try:
     response = requests.get(url_uts, timeout=15)
