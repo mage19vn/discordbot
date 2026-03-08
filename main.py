@@ -35,7 +35,7 @@ vietnamese_dict = set()
 used = set()
 print("Đang tải từ điển tiếng Việt vào bộ nhớ...")
 
-url = "https://raw.githubusercontent.com/duyet/vietnamese-wordlist/master/Viet74K.txt"
+url = "https://raw.githubusercontent.com/duyet/vietnamese-wordlist/master/Viet39K.txt"
 
 try:
     response = requests.get(url, timeout=10)
@@ -52,7 +52,8 @@ except Exception as e:
     print(f"❌ Không thể kết nối để tải từ điển: {e}")
     
 def lay_nghia_tu(tu):
-    url_wiki = f"https://vi.wiktionary.org/w/api.php?action=query&prop=extracts&titles={tu}&format=json&explaintext=1"
+    tu_chuan = tu.strip().lower()
+    url_wiki = f"https://vi.wiktionary.org/w/api.php?action=query&prop=extracts&titles={tu_chuan}&format=json&explaintext=1"
     try:
         res = requests.get(url_wiki, timeout=3).json() # Timeout ngắn để game không bị giật lag
         pages = res.get("query", {}).get("pages", {})
