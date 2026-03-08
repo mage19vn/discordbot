@@ -53,23 +53,34 @@ except Exception as e:
     
 def lay_nghia_tu(tu):
     tu_chuan = tu.strip().lower()
-    url_wiki = f"https://vi.wiktionary.org/w/api.php?action=query&prop=extracts&titles={tu_chuan}&format=json&explaintext=1"
+    # Thêm redirect=1 để tự động chuyển hướng nếu từ có biến thể
+    url_wiki = f"https://vi.wiktionary.org/w/api.php?action=query&prop=extracts&titles={tu_chuan}&format=json&explaintext=1&redirects=1"
+    
     try:
-        res = requests.get(url_wiki, timeout=3).json() # Timeout ngắn để game không bị giật lag
+        res = requests.get(url_wiki, timeout=5).json()
         pages = res.get("query", {}).get("pages", {})
+        
         for pid, pdata in pages.items():
             if pid != "-1":
                 ext = pdata.get("extract", "").strip()
                 if ext:
-                    # Rút gọn nghĩa: Chỉ lấy dòng đầu tiên chứa nội dung, bỏ qua các tiêu đề
-                    lines = [l.strip() for l in ext.split('\n') if l.strip() and not l.startswith('=')]
-                    if lines:
-                        nghia = lines[0]
-                        # Cắt bớt nếu dòng giải nghĩa quá dài
+                    ignore_list = ["tiếng việt", "danh từ", "động từ", "tính từ", "trạng từ", "phó từ", tu_chuan]
+                    lines = [l.strip() for l in ext.split('\n') if l.strip()]
+                    
+                    actual_definitions = []
+                    for line in lines:
+                        # Bỏ qua dòng tiêu đề và các từ khóa loại từ
+                        if not line.startswith('=') and line.lower() not in ignore_list:
+                            actual_definitions.append(line)
+                    
+                    if actual_definitions:
+                        # Lấy dòng định nghĩa thực sự đầu tiên
+                        nghia = actual_definitions[0]
                         return nghia[:150] + "..." if len(nghia) > 150 else nghia
-    except:
-        pass
-    return "Từ này hiểm quá, từ điển chưa kịp cập nhật giải nghĩa =))"
+    except Exception as e:
+        print(f"Lỗi tra từ ngầm: {e}")
+        
+    return "Từ này hiểm quá, từ điển của anh mày chưa cập nhật giải nghĩa =))"
 
 def openfile():
     try:
