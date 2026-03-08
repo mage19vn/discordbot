@@ -50,6 +50,25 @@ try:
         print(f"❌ Lỗi khi tải từ điển: Code {response.status_code}")
 except Exception as e:
     print(f"❌ Không thể kết nối để tải từ điển: {e}")
+    
+def lay_nghia_tu(tu):
+    url_wiki = f"https://vi.wiktionary.org/w/api.php?action=query&prop=extracts&titles={tu}&format=json&explaintext=1"
+    try:
+        res = requests.get(url_wiki, timeout=3).json() # Timeout ngắn để game không bị giật lag
+        pages = res.get("query", {}).get("pages", {})
+        for pid, pdata in pages.items():
+            if pid != "-1":
+                ext = pdata.get("extract", "").strip()
+                if ext:
+                    # Rút gọn nghĩa: Chỉ lấy dòng đầu tiên chứa nội dung, bỏ qua các tiêu đề
+                    lines = [l.strip() for l in ext.split('\n') if l.strip() and not l.startswith('=')]
+                    if lines:
+                        nghia = lines[0]
+                        # Cắt bớt nếu dòng giải nghĩa quá dài
+                        return nghia[:150] + "..." if len(nghia) > 150 else nghia
+    except:
+        pass
+    return "Từ này hiểm quá, từ điển chưa kịp cập nhật giải nghĩa =))"
 
 def openfile():
     try:
@@ -170,6 +189,7 @@ async def noitu(ctx, *, word: str):
     word = word.strip().lower()
     words_split = word.split()
 
+    # 1. Check luật cơ bản
     if len(words_split) != 2:
         await ctx.send("Sai luật rồi em ơi! Từ đưa ra phải có đúng 2 tiếng nhá. Đừng có lươn =))")
         return
@@ -189,8 +209,8 @@ async def noitu(ctx, *, word: str):
             await ctx.send(f"Mù mắt à =)) Phải bắt đầu bằng chữ `{last_syllable}` chứ. Khôn như em quê anh đầy!")
             return
 
+    # 2. Tìm từ phản hồi của bot
     last_syllable_user = words_split[-1]
-    
     valid_next_words = [w for w in vietnamese_dict if w.startswith(last_syllable_user + " ")]
     
     if not valid_next_words:
@@ -208,7 +228,7 @@ async def noitu(ctx, *, word: str):
         ind += 1
         if ind >= 20: 
             ok = 1
-            break # Thêm break để tránh treo máy
+            break 
             
     if ok == 1:
         await ctx.send(f"Chết tiệt, chữ `{last_syllable_user}` hiểm thế! Anh mày lật nát cuốn từ điển không ra chữ nào. Thôi ván này anh nhường, em thắng! :>>")
@@ -217,11 +237,25 @@ async def noitu(ctx, *, word: str):
         used = set()
         return
         
+    # 3. Lưu dữ liệu ván đấu
     noitu_games[channel_id] = bot_word
     used.add(bot_word)
     used.add(word)
     
-    await ctx.send(f"**{bot_word.capitalize()}** \nNối tiếp đi em trai, dăm ba cái trò trẻ con =))")
+    # 4. Tra nghĩa của cả 2 từ (Dùng asyncio.to_thread để bot không bị đơ khi đợi mạng)
+    nghia_user = await asyncio.to_thread(lay_nghia_tu, word)
+    nghia_bot = await asyncio.to_thread(lay_nghia_tu, bot_word)
+    
+    # 5. Xuất kết quả
+    msg = (
+        f"✅ Em ra từ: **{word.capitalize()}**\n"
+        f"> *📖 {nghia_user}*\n\n"
+        f"🔥 Anh Lâm đáp trả: **{bot_word.capitalize()}**\n"
+        f"> *📖 {nghia_bot}*\n\n"
+        f"Nối tiếp chữ `{bot_word.split()[-1]}` đi em trai, dăm ba cái trò trẻ con :>>"
+    )
+    
+    await ctx.send(msg)
 
 @bot.command()
 async def stopnoitu(ctx):
