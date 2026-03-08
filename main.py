@@ -127,7 +127,7 @@ async def tu_dong_chuc_8_3():
     if hom_nay.day == 8 and hom_nay.month == 3:
         print("Đến 18h ngày 8/3 rồi! Bắt đầu tự động gửi tin nhắn...")
         
-        loi_chuc = """
+        loi_chuc = """||@everyone||
 🌸 **Chúc Mừng Ngày Quốc Tế Phụ Nữ 8/3!** 🌸
 Anh Lâm chúc tất cả các bạn nữ trong server luôn vui vẻ, xinh đẹp, hạnh phúc và code luôn bug-free nhá! =))
 ```cpp
