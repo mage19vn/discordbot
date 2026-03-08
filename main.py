@@ -1,5 +1,7 @@
 import discord
 from discord.ext import commands
+from discord.ext import tasks
+import datetime
 from groq import Groq
 import random
 import time
@@ -22,6 +24,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='>', intents=intents)
 # Khởi tạo client Groq
 client = Groq(api_key=GROQ_API_KEY)
+
+tz_vn = datetime.timezone(datetime.timedelta(hours=7))
+thoi_gian_gui = datetime.time(hour=18, minute=0, second=0, tzinfo=tz_vn)
 
 money = {}
 noitu_games = {}
@@ -115,9 +120,47 @@ Phản hồi của Anh Lâm (chỉ xuất nội dung chat):
 """
     return prompt
 
+@tasks.loop(time=thoi_gian_gui)
+async def tu_dong_chuc_8_3():
+    hom_nay = datetime.datetime.now(tz_vn)
+    
+    if hom_nay.day == 8 and hom_nay.month == 3:
+        print("Đến 18h ngày 8/3 rồi! Bắt đầu tự động gửi tin nhắn...")
+        
+        loi_chuc = """
+🌸 **Chúc Mừng Ngày Quốc Tế Phụ Nữ 8/3!** 🌸
+Anh Lâm chúc tất cả các bạn nữ trong server luôn vui vẻ, xinh đẹp, hạnh phúc và code luôn bug-free nhá! =))
+```cpp
+(Tin nhắn tự động từ hệ thống bot)
+```
+        """
+        
+        for guild in bot.guilds:
+            kênh_đích = None
+            
+            if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+                kênh_đích = guild.system_channel
+            else:
+                # Nếu không có, tìm kênh text đầu tiên chat được
+                for channel in guild.text_channels:
+                    if channel.permissions_for(guild.me).send_messages:
+                        kênh_đích = channel
+                        break
+            
+            if kênh_đích:
+                try:
+                    await kênh_đích.send(loi_chuc)
+                    await asyncio.sleep(1) # Nghỉ 1s để chống bị Discord phạt spam
+                except Exception as e:
+                    print(f"Lỗi gửi ở server {guild.name}: {e}")
+
 @bot.event
 async def on_ready():
     print(f'Bot đã đăng nhập thành công với tên {bot.user}')
+    if not tu_dong_chuc_8_3.is_running():
+        tu_dong_chuc_8_3.start()
+        print("⏰ Đã bật chế độ tự động canh đúng 18h ngày 8/3 để gửi lời chúc!")
+    
 
 @bot.command()
 async def noitu(ctx, *, word: str):
@@ -243,7 +286,7 @@ async def ask(ctx, *, question: str):
         print(e)
         
 @bot.command()
-async def guild(ctx):
+async def guide(ctx):
     await ctx.send("""Tạo tài khoản với lệnh **>regis** và được cấp 100 dwc (đô la bò)
 Check tiền còn lại với lệnh **>coin**
 Chọn Xỉu (số lẻ) với lệnh **>xiu**
