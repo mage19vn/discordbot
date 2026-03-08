@@ -35,19 +35,27 @@ vietnamese_dict = set()
 used = set()
 print("Đang tải từ điển tiếng Việt vào bộ nhớ...")
 
-url = "https://raw.githubusercontent.com/duyet/vietnamese-wordlist/master/Viet74K.txt"
+url = "https://raw.githubusercontent.com/undertheseanlp/dictionary/master/dictionary/words.txt"
 
 try:
-    response = requests.get(url, timeout=10)
+    response = requests.get(url_uts, timeout=15)
     response.encoding = 'utf-8'
     if response.status_code == 200:
         for line in response.text.splitlines():
-            word = line.strip().lower()
-            if len(word.split()) == 2:
-                vietnamese_dict.add(word)
-        print(f"✅ Đã tải thành công {len(vietnamese_dict)} từ ghép 2 tiếng vào RAM!")
+            try:
+                # Phân tích từng dòng thành đối tượng JSON
+                data = json.loads(line)
+                word = data.get("text", "").strip().lower()
+                
+                # Lọc lấy từ ghép đúng 2 tiếng cho game nối từ
+                if len(word.split()) == 2:
+                    vietnamese_dict.add(word)
+            except json.JSONDecodeError:
+                continue # Bỏ qua nếu dòng đó không phải JSON hợp lệ
+                
+        print(f"✅ Đã nạp thành công {len(vietnamese_dict)} từ ghép chuẩn!")
     else:
-        print(f"❌ Lỗi khi tải từ điển: Code {response.status_code}")
+        print(f"❌ Lỗi tải file: Code {response.status_code}")
 except Exception as e:
     print(f"❌ Không thể kết nối để tải từ điển: {e}")
     
