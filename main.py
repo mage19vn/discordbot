@@ -6,10 +6,16 @@ import time
 import os
 import requests
 import asyncio
+import redis
 
 # Khuyến cáo: Nên dùng os.environ.get trên hosting thay vì dán thẳng Key vào code
-GROQ_API_KEY = os.environ.get("GROQ_KEY")
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT")
+GROQ_API_KEY = os.environ.get("GROQ_KEY").strip()
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT").strip()
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL is None:
+    print("❌ LỖI: Chưa có biến môi trường REDIS_URL!")
+else:
+    db = redis.from_url(REDIS_URL, decode_responses=True)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -246,79 +252,89 @@ Hết tiền thì xin anh Lâm chứ cũng không biết làm sao:>>>>""")
 
 @bot.command()
 async def regis(ctx):
-    if ctx.author.name in money:
+    # db.exists kiểm tra xem user đã có trong database chưa
+    if db.exists(ctx.author.name):
         await ctx.send(f"Đã có tài khoản **{ctx.author.name}**")
     else:
-        money[ctx.author.name] = 100
-        await ctx.send(f"Đã tạo tài khoản {ctx.author.mention} với số tiền 100 dcw (đô la bò).")
+        # Lưu vào db: db.set(key, value)
+        db.set(ctx.author.name, 100)
+        await ctx.send(f"Đã tạo tài khoản {ctx.author.mention} với số tiền 100 dwc (đô la bò).")
     
 @bot.command()
 async def coin(ctx):
-    if ctx.author.name in money: 
-        await ctx.send(f"Số tiền của {ctx.author.mention} là: **{money[ctx.author.name]}**")
+    # Lấy tiền từ db ra
+    tien = db.get(ctx.author.name)
+    if tien is not None: 
+        await ctx.send(f"Số tiền của {ctx.author.mention} là: **{tien}** dwc")
     else:
         await ctx.send("Hãy tạo tài khoản với lệnh >regis")
     
 @bot.command()
 async def tai(ctx, tiencuoc=10):
+    tien_hien_tai = db.get(ctx.author.name)
+    
+    if tien_hien_tai is None:
+        await ctx.send("Hãy tạo tài khoản với lệnh >regis")
+        return
+        
+    tien_hien_tai = int(tien_hien_tai) # Chuyển thành số nguyên để tính toán
+    
     try:
         tiencuoc = int(tiencuoc)
-        if tiencuoc > money[ctx.author.name]:
+        if tiencuoc > tien_hien_tai:
             await ctx.send("Tiền cược vượt quá số tiền hiện có. Mặc định all in!!!")
-            tiencuoc = money[ctx.author.name]
-    except:
+            tiencuoc = tien_hien_tai
+    except ValueError:
         await ctx.send("Sai cú pháp rồi baby! >tai 10 nhé")
         return
         
-    if ctx.author.name in money:
-        d1, d2, d3, total, ket_qua = lac_xuc_xac()
-        
-        await ctx.send(f"🎲 Xúc xắc đang lăn...")
-        time.sleep(2) # Anh Lâm note nhẹ: Sau này đổi thành await asyncio.sleep(2) cho pro nha
-        await ctx.send(f"Kết quả: **{d1} - {d2} - {d3}** (Tổng: {total})")
-        await ctx.send(f"Anh Lâm ra: **{ket_qua}**")
-        
-        if ket_qua == "Tài":
-            money[ctx.author.name] += tiencuoc
-            await ctx.send(f"🎉 Chúc mừng, {ctx.author.mention} chọn Tài và đã thắng! :>>")
-            await ctx.send(f"Số tiền bạn có đã tăng lên {money[ctx.author.name]}!")
-        else:
-            money[ctx.author.name] -= tiencuoc
-            await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))")
-            await ctx.send(f"Số tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại còn {money[ctx.author.name]} trong tài khoản!")
-        writefile()
+    d1, d2, d3, total, ket_qua = lac_xuc_xac()
+    
+    await ctx.send(f"🎲 Xúc xắc đang lăn...")
+    await asyncio.sleep(2) # Nên dùng asyncio.sleep thay vì time.sleep để bot không bị đơ
+    await ctx.send(f"Kết quả: **{d1} - {d2} - {d3}** (Tổng: {total})\nAnh Lâm ra: **{ket_qua}**")
+    
+    if ket_qua == "Tài":
+        tien_moi = tien_hien_tai + tiencuoc
+        db.set(ctx.author.name, tien_moi) # Cập nhật lại db
+        await ctx.send(f"🎉 Chúc mừng, {ctx.author.mention} chọn Tài và đã thắng! :>>\nSố tiền bạn có đã tăng lên {tien_moi} dwc!")
     else:
-        await ctx.send("Hãy tạo tài khoản với lệnh >regis")
+        tien_moi = tien_hien_tai - tiencuoc
+        db.set(ctx.author.name, tien_moi) # Cập nhật lại db
+        await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))\nSố tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại {tien_moi} dwc trong tài khoản!")
 
 @bot.command()
 async def xiu(ctx, tiencuoc=10):
+    tien_hien_tai = db.get(ctx.author.name)
+    
+    if tien_hien_tai is None:
+        await ctx.send("Hãy tạo tài khoản với lệnh >regis")
+        return
+        
+    tien_hien_tai = int(tien_hien_tai) # Chuyển thành số nguyên để tính toán
+    
     try:
         tiencuoc = int(tiencuoc)
-        if tiencuoc > money[ctx.author.name]:
+        if tiencuoc > tien_hien_tai:
             await ctx.send("Tiền cược vượt quá số tiền hiện có. Mặc định all in!!!")
-            tiencuoc = money[ctx.author.name]
-    except:
+            tiencuoc = tien_hien_tai
+    except ValueError:
         await ctx.send("Sai cú pháp rồi baby! >xiu 10 nhé")
         return
         
-    if ctx.author.name in money:
-        d1, d2, d3, total, ket_qua = lac_xuc_xac()
-        
-        await ctx.send(f"🎲 Xúc xắc đang lăn...")
-        time.sleep(2)
-        await ctx.send(f"Kết quả: **{d1} - {d2} - {d3}** (Tổng: {total})")
-        await ctx.send(f"Anh Lâm ra: **{ket_qua}**")
-        
-        if ket_qua == "Xỉu":
-            money[ctx.author.name] += tiencuoc
-            await ctx.send(f"🎉 Chúc mừng, {ctx.author.mention} chọn Xỉu và đã thắng! :>>")
-            await ctx.send(f"Số tiền bạn có đã tăng lên {money[ctx.author.name]}!")
-        else:
-            money[ctx.author.name] -= tiencuoc
-            await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))")
-            await ctx.send(f"Số tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại còn {money[ctx.author.name]} trong tài khoản!")
-        writefile()
+    d1, d2, d3, total, ket_qua = lac_xuc_xac()
+    
+    await ctx.send(f"🎲 Xúc xắc đang lăn...")
+    await asyncio.sleep(2) # Nên dùng asyncio.sleep thay vì time.sleep để bot không bị đơ
+    await ctx.send(f"Kết quả: **{d1} - {d2} - {d3}** (Tổng: {total})\nAnh Lâm ra: **{ket_qua}**")
+    
+    if ket_qua == "Xỉu":
+        tien_moi = tien_hien_tai + tiencuoc
+        db.set(ctx.author.name, tien_moi) # Cập nhật lại db
+        await ctx.send(f"🎉 Chúc mừng, {ctx.author.mention} chọn Xỉu và đã thắng! :>>\nSố tiền bạn có đã tăng lên {tien_moi} dwc!")
     else:
-        await ctx.send("Hãy tạo tài khoản với lệnh >regis")
+        tien_moi = tien_hien_tai - tiencuoc
+        db.set(ctx.author.name, tien_moi) # Cập nhật lại db
+        await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))\nSố tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại {tien_moi} dwc trong tài khoản!")
         
 bot.run(DISCORD_TOKEN)
