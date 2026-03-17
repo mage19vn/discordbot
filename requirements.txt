@@ -1,9 +1,9 @@
-﻿discord.py==2.7.0
+discord.py
 groq
 requests==2.32.5
 python-dotenv==1.1.0
 google-generativeai
 redis==5.0.1
-qrcode==7.4.2
+qrcode[pil]
 Pillow==10.2.0
-discord.py==2.3.2
+
