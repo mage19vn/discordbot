@@ -439,7 +439,7 @@ async def xiu(ctx, tiencuoc=10):
         await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))\nSố tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại {tien_moi} dwc trong tài khoản!")
         
 @bot.command()
-async def qr(ctx, *, link: str):
+async def qr(ctx, link: str, fg = "black", bg = "white"):
     """Lệnh tạo mã QR: !qr https://google.com"""
     await ctx.send("Đang tạo...")
     # 1. Tạo mã QR
@@ -447,7 +447,7 @@ async def qr(ctx, *, link: str):
     qr.add_data(link)
     qr.make(fit=True)
     
-    img = qr.make_image(fill_color="black", back_color="white")
+    img = qr.make_image(fill_color=fg, back_color=bg)
     
     # 2. Lưu ảnh vào bộ nhớ tạm (Buffer) thay vì lưu file vật lý
     with io.BytesIO() as image_binary:
