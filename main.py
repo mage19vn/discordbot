@@ -441,7 +441,7 @@ async def xiu(ctx, tiencuoc=10):
 @bot.command()
 async def qr(ctx, *, link: str):
     """Lệnh tạo mã QR: !qr https://google.com"""
-    
+    await ctx.send("Đang tạo...")
     # 1. Tạo mã QR
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(link)
