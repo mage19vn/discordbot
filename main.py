@@ -458,4 +458,25 @@ async def qr(ctx, link: str, fg = "black", bg = "white"):
         file = discord.File(fp=image_binary, filename='qrcode.png')
         await ctx.send(f"Đây là mã QR cho nội dung: `{link}`", file=file)
 
-bot.run(DISCORD_TOKEN)
+@bot.command()
+async def qr_dv(ctx, *, link: str, fg = "black", bg = "gray"):
+    """Lệnh tạo mã QR: !qr https://google.com"""
+    await ctx.send("Đang tạo...")
+    # 1. Tạo mã QR
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(link)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color=fg, back_color=bg)
+    
+    # 2. Lưu ảnh vào bộ nhớ tạm (Buffer) thay vì lưu file vật lý
+    with io.BytesIO() as image_binary:
+        img.save(image_binary, 'PNG')
+        image_binary.seek(0)
+        
+        # 3. Gửi file lên Discord
+        file = discord.File(fp=image_binary, filename='qrcode.png')
+        await ctx.send(f"Đây là mã QR cho nội dung: `{link}`", file=file)
+
+
+bot. run(DISCORD_TOKEN)
