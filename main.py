@@ -12,11 +12,13 @@ import redis
 import json
 import qrcode
 import io
+from PIL import Image
+# from dotenv import load_dotenv
 
+# load_dotenv()
 
-# Khuyến cáo: Nên dùng os.environ.get trên hosting thay vì dán thẳng Key vào code
-GROQ_API_KEY = os.environ.get("GROQ_KEY").strip()
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT").strip()
+GROQ_API_KEY = os.environ.get("GROQ_KEY")
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_CHATBOT")
 REDIS_URL = os.environ.get("REDIS_URL")
 if REDIS_URL is None:
     print("❌ LỖI: Chưa có biến môi trường REDIS_URL!")
@@ -440,43 +442,50 @@ async def xiu(ctx, tiencuoc=10):
         
 @bot.command()
 async def qr(ctx, link: str, fg = "black", bg = "white"):
-    """Lệnh tạo mã QR: !qr https://google.com"""
     await ctx.send("Đang tạo...")
-    # 1. Tạo mã QR
+    
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(link)
     qr.make(fit=True)
     
     img = qr.make_image(fill_color=fg, back_color=bg)
     
-    # 2. Lưu ảnh vào bộ nhớ tạm (Buffer) thay vì lưu file vật lý
     with io.BytesIO() as image_binary:
         img.save(image_binary, 'PNG')
         image_binary.seek(0)
         
-        # 3. Gửi file lên Discord
         file = discord.File(fp=image_binary, filename='qrcode.png')
         await ctx.send(f"Đây là mã QR cho nội dung: `{link}`", file=file)
 
 @bot.command()
-async def qr_dv(ctx, *, link: str, fg = "black", bg = "gray"):
-    """Lệnh tạo mã QR: !qr https://google.com"""
+async def qr_dv(ctx, fg = "black", bg = "gray", *, link: str):
     await ctx.send("Đang tạo...")
-    # 1. Tạo mã QR
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=5)
     qr.add_data(link)
     qr.make(fit=True)
     
-    img = qr.make_image(fill_color=fg, back_color=bg)
+    img = qr.make_image(fill_color=fg, back_color=bg).convert('RGB')
     
-    # 2. Lưu ảnh vào bộ nhớ tạm (Buffer) thay vì lưu file vật lý
+    try:
+        logo = Image.open("logo.png") 
+        
+        qr_width, qr_height = img.size
+        logo_size = qr_width // 4 
+        logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
+
+        pos = ((qr_width - logo_size) // 2, (qr_height - logo_size) // 2)
+
+        img.paste(logo, pos)
+    except Exception as e:
+        print(f"Không tìm thấy logo hoặc lỗi: {e}")
+
     with io.BytesIO() as image_binary:
         img.save(image_binary, 'PNG')
         image_binary.seek(0)
         
-        # 3. Gửi file lên Discord
-        file = discord.File(fp=image_binary, filename='qrcode.png')
-        await ctx.send(f"Đây là mã QR cho nội dung: `{link}`", file=file)
+        file = discord.File(fp=image_binary, filename='qrcode_logo.png')
+        await ctx.send(f"Đây là mã QR có logo cho: `{link}`", file=file)
 
 
 bot. run(DISCORD_TOKEN)
