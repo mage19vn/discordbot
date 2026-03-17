@@ -435,4 +435,24 @@ async def xiu(ctx, tiencuoc=10):
         db.set(ctx.author.name, tien_moi) # Cập nhật lại db
         await ctx.send(f"💸 Tiếc quá, {ctx.author.mention} thua rồi. Còn thở là còn gỡ =))\nSố tiền bạn có đã giảm đi {tiencuoc} dwc và còn lại {tien_moi} dwc trong tài khoản!")
         
+@bot.command()
+async def qr(ctx, *, link: str):
+    """Lệnh tạo mã QR: !qr https://google.com"""
+    
+    # 1. Tạo mã QR
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(link)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # 2. Lưu ảnh vào bộ nhớ tạm (Buffer) thay vì lưu file vật lý
+    with io.BytesIO() as image_binary:
+        img.save(image_binary, 'PNG')
+        image_binary.seek(0)
+        
+        # 3. Gửi file lên Discord
+        file = discord.File(fp=image_binary, filename='qrcode.png')
+        await ctx.send(f"Đây là mã QR cho nội dung: `{link}`", file=file)
+
 bot.run(DISCORD_TOKEN)
