@@ -10,6 +10,9 @@ import requests
 import asyncio
 import redis
 import json
+import qrcode
+import io
+
 
 # Khuyến cáo: Nên dùng os.environ.get trên hosting thay vì dán thẳng Key vào code
 GROQ_API_KEY = os.environ.get("GROQ_KEY").strip()
