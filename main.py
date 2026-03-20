@@ -208,7 +208,7 @@ async def on_ready():
         
 @bot.event
 async def on_message(message):
-    BANNED_WORDS = ["uk", "ừ", "bò béo"]
+    BANNED_WORDS = ["uk", "ừ", "bò béo", "u.k", "u,k", "u-k", "u`k", "um", "u.m", "ụk"]
     if message.author == bot.user:
         return
 
@@ -216,7 +216,6 @@ async def on_message(message):
 
     if any(word in msg_content for word in BANNED_WORDS):
         try:
-            # 1. Xóa tin nhắn vi phạm
             await message.delete() 
             
             warning_msg = await message.channel.send(
