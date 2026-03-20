@@ -205,6 +205,30 @@ async def on_ready():
     if not tu_dong_chuc_8_3.is_running():
         tu_dong_chuc_8_3.start()
         print("⏰ Đã bật chế độ tự động canh đúng 18h ngày 8/3 để gửi lời chúc!")
+        
+@bot.event
+async def on_message(message):
+    BANNED_WORDS = ["uk", "ừ", "bò béo"]
+    if message.author == bot.user:
+        return
+
+    msg_content = message.content.lower()
+
+    if any(word in msg_content for word in BANNED_WORDS):
+        try:
+            # 1. Xóa tin nhắn vi phạm
+            await message.delete() 
+            
+            warning_msg = await message.channel.send(
+                f"⚠️ {message.author.mention}, Hỗn nha!!!"
+            )
+            
+            await warning_msg.delete(delay=5)
+            
+        except discord.Forbidden:
+            print("Lỗi: Bot không có quyền 'Manage Messages' để xóa tin nhắn.")
+
+    await bot.process_commands(message)
     
 
 @bot.command()
