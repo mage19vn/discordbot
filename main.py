@@ -515,7 +515,7 @@ async def ask(ctx, question):
     await ctx.send(f"Đang đọc tin nhắn: `{question}`. Đợi anh Lâm xíu...")
     await asyncio.sleep(1)
     sl = random.randint(1, 100)
-    await ctx.send(("M"+"0"*random.randint(2, 5))*sl)
+    await ctx.send(("M"+"0"*random.randint(2, 5)+' ')*sl)
 
 
 bot. run(DISCORD_TOKEN)
