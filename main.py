@@ -316,7 +316,7 @@ async def stopnoitu(ctx):
         await ctx.send("Hiện tại không có ván nối từ nào đang diễn ra.")
    
 @bot.command()
-async def ask(ctx, *, question: str):
+async def askk(ctx, *, question: str):
     await ctx.send(f"Đang đọc tin nhắn: `{question}`. Đợi anh Lâm xíu...")
     
     try:
@@ -511,7 +511,9 @@ async def qr_dv(ctx, fg = "black", bg = "gray", *, link: str):
         await ctx.send(f"Đây là mã QR có logo cho: `{link}`", file=file)
         
 @bot.command()
-async def askk(ctx):
+async def ask(ctx, question):
+    await ctx.send(f"Đang đọc tin nhắn: `{question}`. Đợi anh Lâm xíu...")
+    await asyncio.sleep(1)
     sl = random.randint(1, 100)
     await ctx.send(("M"+"0"*random.randint(2, 5))*sl)
 
