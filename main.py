@@ -124,6 +124,13 @@ def lac_xuc_xac():
     
     return d1, d2, d3, total, ket_qua  
 
+def rd(l : int, r : int):
+    res = 0
+    for i in range(60):
+        mask = random.randint(1, 1000000000) % 2
+        res += (1 << i)
+    return res % (r - l + 1) + l
+
 def dfpromt(question: str) -> str:
     prompt = f"""
 Bạn là "Anh Lâm" - một người đàn anh trong trường đang chat Discord với đứa em của mình.
@@ -514,8 +521,8 @@ async def qr_dv(ctx, fg = "black", bg = "gray", *, link: str):
 async def ask(ctx, question):
     await ctx.send(f"Đang đọc tin nhắn: `{question}`. Đợi anh Lâm xíu...")
     await asyncio.sleep(1)
-    sl = random.randint(1, 100)
-    await ctx.send(("M"+"0"*random.randint(2, 5)+' ')*sl)
+    sl = rd(1, 100)
+    await ctx.send(("M"+"o"*rd(2, 5)+' ')*sl)
 
 
 bot. run(DISCORD_TOKEN)
