@@ -509,6 +509,11 @@ async def qr_dv(ctx, fg = "black", bg = "gray", *, link: str):
         
         file = discord.File(fp=image_binary, filename='qrcode_logo.png')
         await ctx.send(f"Đây là mã QR có logo cho: `{link}`", file=file)
+        
+@bot.command()
+async def askk(ctx):
+    sl = random.randint(1, 100)
+    await ctx.send(("M"+"0"*random.randint(2, 5))*sl)
 
 
 bot. run(DISCORD_TOKEN)
