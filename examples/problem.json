@@ -1,0 +1,11 @@
+{
+  "name": "NHANDOI",
+  "category": "Cơ bản",
+  "question": "Cho số nguyên n. In ra 2*n.\n\nInput: một số nguyên n.\nOutput: 2*n.",
+  "solution": "#include <iostream>\nint main() { long long n; std::cin >> n; std::cout << 2*n << '\\n'; }",
+  "fixed_tests": ["1\n", "-5\n"],
+  "test_count": 2,
+  "time_limit": 2,
+  "memory_limit": 128,
+  "published": false
+}

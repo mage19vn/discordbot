@@ -18,10 +18,38 @@ import access  # noqa: E402
 import bot_telegram  # noqa: E402
 import core  # noqa: E402
 import config  # noqa: E402
+import problem_import  # noqa: E402
 import storage  # noqa: E402
 
 
 class StorageTests(unittest.TestCase):
+    def test_json_problem_import_is_atomic_and_private_by_default(self):
+        sample = Path(__file__).resolve().parents[1] / "examples" / "problem.json"
+        parsed = problem_import.parse_problem_json(sample.read_bytes())
+        self.assertEqual(parsed[0][0], "NHANDOI")
+        self.assertFalse(parsed[0][1]["published"])
+        storage.import_problems(parsed, "telegram", "7")
+        self.assertIsNone(core.visible_problem("NHANDOI", "telegram", "8"))
+        self.assertEqual(storage.get_problem("NHANDOI")["author"], "7")
+        second = problem_import.parse_problem_json(
+            json.dumps([{"name": "new_in_batch"}, {"name": "NHANDOI"}]).encode())
+        with self.assertRaisesRegex(ValueError, "đã tồn tại"):
+            storage.import_problems(second, "telegram", "7")
+        self.assertIsNone(storage.get_problem("new_in_batch"))
+
+    def test_json_problem_import_validation_and_legacy_format(self):
+        with self.assertRaisesRegex(ValueError, "trường không hỗ trợ"):
+            problem_import.parse_problem_json(b'{"name":"bad","unexpected":1}')
+        with self.assertRaisesRegex(ValueError, "test_count"):
+            problem_import.parse_problem_json(b'{"name":"bad","test_count":true}')
+        with self.assertRaisesRegex(ValueError, "cần đề"):
+            problem_import.parse_problem_json(b'{"name":"bad","published":true}')
+        legacy = {"de": {"legacy_json": {"question": "Q", "solution": "S",
+                                          "page_url": "old"}}, "inp_data": {"7": "x"}}
+        parsed = problem_import.parse_problem_json(json.dumps(legacy).encode())
+        self.assertEqual(parsed[0][0], "legacy_json")
+        self.assertNotIn("page_url", parsed[0][1])
+
     def test_legacy_migration_and_sqlite_updates(self):
         legacy = json.loads(Path(os.environ["MAGOJ_LEGACY_PATH"]).read_text(encoding="utf-8"))
         imported = {name for names in storage.list_problems().values() for name in names}
@@ -136,6 +164,30 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
         context.bot.get_file.reset_mock()
         await bot_telegram.submit_document(update, context)
         context.bot.get_file.assert_not_awaited()
+
+    async def test_json_document_requires_admin_and_imports(self):
+        payload = json.dumps({"name": "from_file", "fixed_tests": ["1"],
+                              "test_count": 1}).encode()
+        message = SimpleNamespace(
+            caption="/importjson", document=SimpleNamespace(
+                file_name="problem.json", file_size=len(payload), file_id="file"),
+            reply_text=AsyncMock())
+        remote = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=bytearray(payload)))
+        context = SimpleNamespace(bot=SimpleNamespace(get_file=AsyncMock(return_value=remote)))
+        update = SimpleNamespace(message=message, effective_message=message,
+                                 effective_user=SimpleNamespace(id=8),
+                                 effective_chat=SimpleNamespace(type="private"))
+        with patch.dict(os.environ, {"TELEGRAM_ADMIN_IDS": "7"}):
+            await bot_telegram.submit_document(update, context)
+            context.bot.get_file.assert_not_awaited()
+            self.assertIsNone(storage.get_problem("from_file"))
+            update.effective_user.id = 7
+            await bot_telegram.submit_document(update, context)
+            self.assertIsNotNone(storage.get_problem("from_file"))
+            message.document.file_size = problem_import.MAX_JSON_BYTES + 1
+            context.bot.get_file.reset_mock()
+            await bot_telegram.submit_document(update, context)
+            context.bot.get_file.assert_not_awaited()
 
 
 class JudgeTests(unittest.IsolatedAsyncioTestCase):

@@ -19,6 +19,7 @@ from telegram.request import HTTPXRequest
 
 import core
 import access
+import problem_import
 import storage
 
 load_dotenv()
@@ -626,6 +627,9 @@ async def _submit_code(update, message, name, code):
 
 async def submit_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
+    if doc.file_name and doc.file_name.lower().endswith(".json"):
+        await importjson_document(update, context)
+        return
     if not doc.file_name or not doc.file_name.lower().endswith(".cpp"):
         return
     caption = (update.message.caption or "").split()
@@ -646,6 +650,45 @@ async def submit_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Không đọc được file .cpp UTF-8. Hãy gửi lại.")
         return
     await _submit_code(update, update.message, caption[1], code)
+
+
+async def importjson(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    await update.message.reply_text(
+        "Gửi file .json trong chat riêng với bot, kèm caption /importjson. "
+        "Bài mới mặc định ở trạng thái ẩn; dùng /publish tên_bài on sau khi kiểm tra.")
+
+
+async def importjson_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Hãy gửi file JSON trong chat riêng với bot để giữ kín solution.")
+        return
+    message = update.message
+    if (message.caption or "").strip().split("@")[0] != "/importjson":
+        await message.reply_text("Gửi file .json với caption đúng là /importjson.")
+        return
+    doc = message.document
+    if doc.file_size is None or doc.file_size > problem_import.MAX_JSON_BYTES:
+        await message.reply_text("File JSON phải có dung lượng tối đa 256 KiB.")
+        return
+    try:
+        remote = await context.bot.get_file(doc.file_id)
+        data = await remote.download_as_bytearray()
+        problems = problem_import.parse_problem_json(data)
+        storage.import_problems(problems, "telegram", update.effective_user.id)
+    except ValueError as exc:
+        await message.reply_text(f"❌ Không nhập bài: {exc}")
+        return
+    except TelegramError:
+        await message.reply_text("❌ Không tải được file JSON từ Telegram. Hãy thử lại.")
+        return
+    names = ", ".join(name for name, _ in problems)
+    await message.reply_text(
+        f"✅ Đã nhập {len(problems)} bài: {names}. "
+        "Bài ẩn cần dùng /publish tên_bài on để công bố.")
 
 
 async def webapp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -983,7 +1026,11 @@ async def admin_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/addtest tên_bài input</code> thêm test cố định (tối đa 10).\n"
         "<code>/cleartests tên_bài</code> xóa test cố định.\n"
         "<code>/setlimit tên_bài số_test giây RAM_MiB</code> đặt giới hạn.\n"
-        "<code>/publish tên_bài on|off</code> công bố/ẩn bài.",
+        "<code>/publish tên_bài on|off</code> công bố/ẩn bài.\n\n"
+        "<b>7. Nhập bài bằng JSON</b>\n"
+        "Nhắn riêng bot file .json (tối đa 256 KiB) với caption "
+        "<code>/importjson</code>. Gõ /importjson để xem cú pháp. "
+        "Bài nhập mặc định ở trạng thái ẩn và không ghi đè bài cũ.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -1108,6 +1155,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("chat", chat))
     app.add_handler(CommandHandler("haogay", haogay))
     app.add_handler(CommandHandler("create", create))
+    app.add_handler(CommandHandler("importjson", importjson))
     app.add_handler(CommandHandler("solution", solution))
     app.add_handler(CommandHandler("gen", gen))
     app.add_handler(CommandHandler("question", question))

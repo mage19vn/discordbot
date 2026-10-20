@@ -85,6 +85,23 @@ def create_problem(name, author=None):
             return False
 
 
+def import_problems(problems, platform, user_id):
+    """Import a validated batch as one transaction; existing names abort all."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, _connect() as db:
+        try:
+            for name, fields in problems:
+                body = {**fields, "version": 1, "author": str(user_id),
+                        "created_at": now}
+                db.execute("INSERT INTO problems(name,body) VALUES (?,?)",
+                           (name, json.dumps(body, ensure_ascii=False)))
+                db.execute("INSERT INTO admin_events(platform,user_id,action,problem) "
+                           "VALUES (?,?,?,?)", (platform, str(user_id), "importjson", name))
+        except sqlite3.IntegrityError as exc:
+            db.rollback()
+            raise ValueError("Có tên bài đã tồn tại; không bài nào trong file được nhập.") from exc
+
+
 def set_field(name, field, value):
     return set_fields(name, {field: value})
 

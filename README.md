@@ -98,6 +98,7 @@ Các bài ẩn không hiện trong danh sách, đề hoặc luồng nộp của 
 | Chức năng | Discord | Telegram |
 | --- | --- | --- |
 | Tạo bài (admin) | `>create` | `/create` |
+| Nhập bài JSON (admin) | — | Gửi file `.json` với caption `/importjson` |
 | Sửa đề/solution/generator/checker (admin) | `>question`, `>solution`, `>gen`, `>checker` | `/question`, `/solution`, `/gen`, `/checker` |
 | Phân loại (admin) | `>category` | `/category` |
 | Test và giới hạn (admin) | — | `/addtest`, `/cleartests`, `/setlimit`, `/publish` |
@@ -109,6 +110,42 @@ Các bài ẩn không hiện trong danh sách, đề hoặc luồng nộp của 
 
 Code C++ đặt trong khối code ba dấu backtick. Slash command Discord đồng bộ
 khi bot khởi động; lệnh toàn cục có thể cần thời gian mới hiện trên Discord.
+
+## Thêm bài trên Telegram
+
+Đặt `TELEGRAM_ADMIN_IDS` trong `.env` hoặc Environment Variables của KataBump
+bằng Telegram user ID của bạn. Các lệnh quản trị chỉ hoạt động với ID này.
+Để tạo bài thủ công, nhắn bot `/create NHANDOI`, rồi `/publish NHANDOI off`
+trong lúc soạn. Thêm đề bằng `/question NHANDOI nội_dung_đề`, lời giải C++
+bằng `/solution NHANDOI` kèm code, và test cố định bằng
+`/addtest NHANDOI 1` (lặp lại cho từng input). Sau đó đặt
+`/setlimit NHANDOI 2 2 128` nếu có hai test cố định. Nếu còn thiếu test cố
+định so với số test đã đặt, thêm `/gen NHANDOI` kèm code generator C++.
+Dùng `/show NHANDOI` để xem đề; có thể thử nộp bằng tài khoản admin. Khi đã
+kiểm tra xong, gõ `/publish NHANDOI on` để học sinh thấy bài.
+
+Để thêm bằng JSON, dùng [file mẫu](examples/problem.json) hoặc tạo file UTF-8
+theo cùng cấu trúc. Mỗi file có thể là một object bài như mẫu, mảng tối đa
+20 bài, `{"problems": [...]}`, hoặc bản `data.json` cũ với `{"de": {"TÊN":
+{...}}}`. Các trường `name`, `question`, `solution`, `gen_test`, `checker`,
+`category`, `fixed_tests`, `test_count`, `time_limit`, `memory_limit` và
+`published` được hỗ trợ. `name` dùng chữ Latin, số, `_` hoặc `-`, tối đa
+64 ký tự và không có dấu cách để dùng được với `/submit`. `fixed_tests`
+là mảng input dạng chuỗi; mỗi input tối đa 4 KiB. Nếu số test cố định ít hơn
+`test_count`, cần có `gen_test` để sinh phần còn lại. `test_count` từ 1–10,
+`time_limit` từ 1–2 giây và `memory_limit` từ 64–128 MiB. File tối đa
+256 KiB; mỗi đề/code tối đa 64 KiB.
+
+Nhắn **riêng** bot file `.json`, đặt caption chính xác là `/importjson`. Bot
+kiểm tra quyền admin và toàn bộ file trước khi nhập vào SQLite. Nếu sai định
+dạng hoặc trùng tên bài đã có, bot từ chối cả file và không ghi đè dữ liệu.
+Bài nhập mặc định **ẩn**, kể cả khi file `data.json` cũ không có trường
+`published`. Xem lại bằng `/show TÊN`, thử chấm, rồi `/publish TÊN on`.
+Trường `published: true` chỉ dùng khi file đã có đề, lời giải và đủ test hoặc
+generator. Solution trong JSON chứa code và đáp án chuẩn, nên không gửi file
+trong nhóm hoặc chia sẻ công khai. Dữ liệu mới được lưu trong `data.sqlite3`;
+không sửa file `data.json` gốc. Khi cập nhật code trên KataBump, giữ nguyên
+database này.
 
 ## Phát triển và kiểm thử
 
