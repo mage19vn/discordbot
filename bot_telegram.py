@@ -12,12 +12,14 @@ from dotenv import load_dotenv
 from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
                        ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, WebAppInfo)
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (ApplicationBuilder, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
 from telegram.request import HTTPXRequest
 
 import core
+import access
+import storage
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -30,7 +32,7 @@ CHUNK = 4000
 MESSAGE_REPLY_TEMPLATES = {
     "ac": [
         "Chúc mừng! Bạn đã giải đúng bài toán.",
-        "AC rồi! Code mượt như nhung, 10/10 test cases gục ngã! 🎉",
+        "AC rồi! Code mượt như nhung, các test cases đều vượt qua! 🎉",
         "Tuyệt vời! Bài này đã bị bạn chinh phục hoàn toàn!",
         "Full AC! Hôm nay bạn chính là main character! ⭐",
         "Đỉnh quá! Máy chấm cũng phải gật gù công nhận!",
@@ -85,6 +87,17 @@ def create_app():
 
 def pre(code: str) -> str:
     return "<pre>" + html.escape(code) + "</pre>"
+
+
+def pre_limited(code: str, max_escaped: int = 1200) -> str:
+    parts, size = [], 0
+    for char in code:
+        escaped = html.escape(char)
+        if size + len(escaped) > max_escaped:
+            break
+        parts.append(escaped)
+        size += len(escaped)
+    return "<pre>" + "".join(parts) + "</pre>"
 
 
 async def reply_long(message, text: str):
@@ -159,13 +172,23 @@ async def haogay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def _require_admin(update):
+    if access.telegram_admin(update.effective_user):
+        return True
+    await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho quản trị viên.")
+    return False
+
+
 async def create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
     _, args = cmd_args(update.message.text)
     name = " ".join(args).strip()
     if not name:
         await update.message.reply_text("❌ Cú pháp: <code>/create tên_bài</code>", parse_mode=ParseMode.HTML)
         return
-    if core.create_problem(name):
+    if core.create_problem(name, update.effective_user.id):
+        storage.record_admin_event("telegram", update.effective_user.id, "create", name)
         text = f"✅ <b>Thành công:</b> Đã tạo bài <code>{html.escape(name)}</code>."
     else:
         text = f"❌ <b>Lỗi:</b> Có bài tên <code>{html.escape(name)}</code> rồi nhen."
@@ -173,6 +196,8 @@ async def create(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _set_field(update, field: str, label: str):
+    if not await _require_admin(update):
+        return
     _, args = cmd_args(update.message.text)
     if len(args) < 2:
         await update.message.reply_text(
@@ -182,6 +207,7 @@ async def _set_field(update, field: str, label: str):
         return
     name, code = args[0].strip(), core.strip_fences(args[1])
     if core.set_problem_field(name, field, code):
+        storage.record_admin_event("telegram", update.effective_user.id, field, name)
         text = f"✅ <b>Thành công:</b> Đã cập nhật {label} cho bài <code>{html.escape(name)}</code>."
     else:
         text = err_not_found(name)
@@ -432,15 +458,17 @@ def _prob_keyboard(problems, ci: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-async def _deliver_problem(send, name: str):
+async def _deliver_problem(send, name: str, user_id=None):
     """Hàm show duy nhất — cả lệnh /show và nút bấm /problems đều gọi hàm này.
     send là hàm async dạng send(text, parse_mode=..., reply_markup=...)."""
-    p = core.get_problem(name)
+    p = core.visible_problem(name, "telegram", user_id)
     if p is None:
         await send(err_not_found(name), parse_mode=ParseMode.HTML)
         return
     ques = default_question(p["question"]) if p["question"] else "<i>Chưa có nội dung đề bài.</i>"
-    header = f"📝 <b>Đề bài: {html.escape(name)}</b>"
+    header = (f"📝 <b>Đề bài: {html.escape(name)}</b>\n"
+              f"{p.get('test_count', 10)} test · {p.get('time_limit', 2)} giây/test "
+              f"· v{p.get('version', 1)}")
     open_tag, close_tag = "<blockquote expandable>", "</blockquote>"
     limit = 4000 - len(open_tag) - len(close_tag)
     body = ques
@@ -479,7 +507,7 @@ async def _deliver_problem(send, name: str):
 async def show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, args = cmd_args(update.message.text)
     name = " ".join(args).strip()
-    await _deliver_problem(update.message.reply_text, name)
+    await _deliver_problem(update.message.reply_text, name, update.effective_user.id)
 
 
 async def _safe_edit(status_msg, text, **kwargs):
@@ -498,7 +526,7 @@ async def _safe_edit(status_msg, text, **kwargs):
 async def _run_judge(name: str, code: str, user, on_update):
     """Chạy core.judge và báo tiến trình qua on_update(text, parse_mode=...) —
     dùng chung cho /submit (sửa tin nhắn) và Web App (gửi tin riêng)."""
-    async for ev in core.judge(name, code):
+    async for ev in core.judge(name, code, "telegram", user.id):
         t = ev["t"]
         if t == "not_found":
             await on_update(err_not_found(name), parse_mode=ParseMode.HTML)
@@ -506,7 +534,7 @@ async def _run_judge(name: str, code: str, user, on_update):
         if t == "status":
             if ev["msg"] == "testing":
                 await on_update(
-                    "🚀 <b>Code biên dịch thành công. Đang chạy bộ 10 Test Cases...</b>",
+                    f"🚀 <b>Code biên dịch thành công. Đang chạy {ev.get('count', 10)} test...</b>",
                     parse_mode=ParseMode.HTML,
                 )
             continue
@@ -515,7 +543,7 @@ async def _run_judge(name: str, code: str, user, on_update):
                    "gen": "Code Gen Test", "checker": "Code Checker"}[ev["who"]]
             title = "❌ <b>Compilation Error</b>" if ev["who"] == "user" else "⚠️ <b>Lỗi hệ thống</b>"
             await on_update(
-                f"{title}\n<b>{who} bị lỗi biên dịch:</b>\n{pre(ev['stderr'][:1800])}",
+                f"{title}\n<b>{who} bị lỗi biên dịch:</b>\n{pre_limited(ev['stderr'], 2500)}",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -527,6 +555,10 @@ async def _run_judge(name: str, code: str, user, on_update):
                 "sol_tle": f"❌ <b>Lỗi hệ thống:</b> TLE ở code Solution chuẩn.",
                 "sol_rte": f"❌ <b>Lỗi hệ thống:</b> Code Solution chuẩn gặp lỗi (RTE).\n{pre(ev.get('detail', '')[:1000])}",
                 "no_compiler": f"❌ <b>Lỗi hệ thống:</b> Máy chấm chưa cài <code>g++</code>, không biên dịch được. Báo admin cài giúp nhé!",
+                "gen_missing": "❌ Bài chưa có đủ test cố định và chưa có generator.",
+                "sandbox": "❌ Trình chạy chấm bài chưa sẵn sàng. Báo quản trị viên kiểm tra cấu hình.",
+                "busy": "⏳ Máy chấm đang bận. Vui lòng nộp lại sau.",
+                "code_limit": "❌ Code phải có nội dung và không vượt quá 64 KiB.",
             }
             await on_update(msgs[ev["msg"]], parse_mode=ParseMode.HTML)
             return
@@ -540,7 +572,8 @@ async def _run_judge(name: str, code: str, user, on_update):
         if t == "tle":
             await on_update(
                 f"{random.choice(MESSAGE_REPLY_TEMPLATES['tle'])}\n"
-                f"❌ <b>Time Limit Exceeded (TLE) tại Test {ev['test']}</b> (Code chạy quá 2 giây).",
+                f"❌ <b>Time Limit Exceeded (TLE) tại Test {ev['test']}</b> "
+                f"(quá {ev.get('limit', 2)} giây).",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -548,9 +581,10 @@ async def _run_judge(name: str, code: str, user, on_update):
             await on_update(
                 f"{random.choice(MESSAGE_REPLY_TEMPLATES['wa'])}\n"
                 f"❌ <b>Wrong Answer (WA) tại Test {ev['test']}</b>\n"
-                f"<b>Input sinh ra:</b>\n{pre(ev['inp'][:500])}\n"
-                f"<b>Output mong đợi:</b>\n{pre(ev['sol'][:500])}\n"
-                f"<b>Output của bạn:</b>\n{pre(ev['out'][:500])}",
+                f"<b>Input sinh ra:</b>\n{pre_limited(ev['inp'], 700)}\n"
+                f"<b>Output mong đợi:</b>\n{pre_limited(ev['sol'], 700)}\n"
+                f"<b>Output của bạn:</b>\n{pre_limited(ev['out'], 700)}\n"
+                f"Seed: <code>{ev.get('seed', '')}</code> · dùng /lastfail để xem lại input.",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -559,7 +593,7 @@ async def _run_judge(name: str, code: str, user, on_update):
             await on_update(
                 f"{random.choice(MESSAGE_REPLY_TEMPLATES['ac'])}\n"
                 f"✅ <b>ACCEPTED!</b>\nChúc mừng {mention}, code của bạn đã vượt qua "
-                f"10/10 test cases bài <code>{html.escape(name)}</code>.",
+                f"{ev.get('count', 10)}/{ev.get('count', 10)} test bài <code>{html.escape(name)}</code>.",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -574,8 +608,11 @@ async def submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     name, code = args[0].strip(), core.strip_fences(args[1])
+    await _submit_code(update, update.message, name, code)
 
-    status_msg = await update.message.reply_text(
+
+async def _submit_code(update, message, name, code):
+    status_msg = await message.reply_text(
         f"⏳ <b>Đang khởi tạo môi trường chấm bài <code>{html.escape(name)}</code>...</b>",
         parse_mode=ParseMode.HTML,
     )
@@ -585,6 +622,30 @@ async def submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_msg = await _safe_edit(status_msg, text, **kw)
 
     await _run_judge(name, code, update.effective_user, edit_update)
+
+
+async def submit_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    if not doc.file_name or not doc.file_name.lower().endswith(".cpp"):
+        return
+    caption = (update.message.caption or "").split()
+    if len(caption) != 2 or caption[0].split("@")[0] != "/submit":
+        await update.message.reply_text("Gửi file .cpp kèm chú thích: /submit tên_bài")
+        return
+    if doc.file_size is None or doc.file_size > access.MAX_CODE_BYTES:
+        await update.message.reply_text("File .cpp phải có dung lượng tối đa 64 KiB.")
+        return
+    try:
+        remote = await context.bot.get_file(doc.file_id)
+        data = await remote.download_as_bytearray()
+        if len(data) > access.MAX_CODE_BYTES:
+            await update.message.reply_text("File .cpp vượt quá 64 KiB.")
+            return
+        code = data.decode("utf-8")
+    except (UnicodeDecodeError, TelegramError):
+        await update.message.reply_text("Không đọc được file .cpp UTF-8. Hãy gửi lại.")
+        return
+    await _submit_code(update, update.message, caption[1], code)
 
 
 async def webapp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -649,9 +710,12 @@ async def on_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def input_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, args = cmd_args(update.message.text)
     inp = core.strip_fences(" ".join(args)).strip().replace("```", "")
+    if not access.valid_input(inp):
+        await update.message.reply_text("❌ Input vượt quá 64 KiB.")
+        return
     core.set_user_input(str(update.effective_user.id), inp)
     await update.message.reply_text(
-        f"✅ <b>Đã nhận input:</b>\n{pre(inp)}",
+        f"✅ <b>Đã nhận input:</b>\n{pre_limited(inp, 3000)}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -669,21 +733,23 @@ async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r = await core.run_once(code, inp)
     t = r["t"]
     if t == "ce":
-        await update.message.reply_text("❌ <b>Lỗi biên dịch</b>\n" + pre(r["stderr"][:1900]), parse_mode=ParseMode.HTML)
+        await update.message.reply_text("❌ <b>Lỗi biên dịch</b>\n" + pre_limited(r["stderr"], 3000), parse_mode=ParseMode.HTML)
     elif t == "rte":
-        await update.message.reply_text("❌ <b>Lỗi khi chạy (Runtime Error)</b>\n" + pre(r["stderr"][:1900]), parse_mode=ParseMode.HTML)
+        await update.message.reply_text("❌ <b>Lỗi khi chạy (Runtime Error)</b>\n" + pre_limited(r["stderr"], 3000), parse_mode=ParseMode.HTML)
     elif t == "tle":
         await update.message.reply_text("❌ <b>Lỗi:</b> Time Limit Exceeded (TLE) - Code chạy quá lâu.", parse_mode=ParseMode.HTML)
     elif t == "empty":
         await update.message.reply_text("⚠️ <b>Chương trình chạy xong nhưng không in ra gì.</b>", parse_mode=ParseMode.HTML)
+    elif t == "sys":
+        await update.message.reply_text("❌ Máy chấm chưa sẵn sàng hoặc code/input quá dài.")
     else:
         out = r["output"] + ("..." if r["truncated"] else "")
-        await update.message.reply_text("✅ <b>Kết quả chạy code:</b>\n" + pre(out), parse_mode=ParseMode.HTML)
+        await update.message.reply_text("✅ <b>Kết quả chạy code:</b>\n" + pre_limited(out, 3000), parse_mode=ParseMode.HTML)
 
 
 async def problems(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, args = cmd_args(update.message.text)
-    cats = core.list_problems()
+    cats = core.list_visible_problems("telegram", update.effective_user.id)
     if not cats:
         await update.message.reply_text("Hiện tại chưa có bài tập nào.")
         return
@@ -748,7 +814,7 @@ async def problems_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý nút bấm: chuyên đề -> danh sách bài -> xem đề (gọi _deliver_problem)."""
     query = update.callback_query
     await query.answer()
-    cats = core.list_problems()
+    cats = core.list_visible_problems("telegram", update.effective_user.id)
     cat_names = list(cats.keys())
     parts = (query.data or "").split(":")
     try:
@@ -774,7 +840,7 @@ async def problems_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _deliver_problem(
                 lambda text, **kw: context.bot.send_message(
                     chat_id=query.message.chat_id, text=text, **kw),
-                name)
+                name, update.effective_user.id)
     except BadRequest:
         pass  # bấm trùng nút / nội dung không đổi thì bỏ qua
     except (IndexError, ValueError):
@@ -784,6 +850,8 @@ async def problems_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
     _, args = cmd_args(update.message.text)
     if len(args) < 2:
         await update.message.reply_text(
@@ -793,11 +861,79 @@ async def category(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     name, cat = args[0].strip(), args[1].strip()
     if core.set_category(name, cat):
+        storage.record_admin_event("telegram", update.effective_user.id, "category", name)
         text = (f"✅ <b>Thành công:</b> Đã cập nhật chuyên đề <code>{html.escape(cat)}</code> "
                 f"cho bài <code>{html.escape(name)}</code>.")
     else:
         text = err_not_found(name)
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def addtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    _, args = cmd_args(update.message.text)
+    if len(args) < 2:
+        await update.message.reply_text("Cú pháp: /addtest tên_bài input_cố_định")
+        return
+    name, value = args[0].strip(), core.strip_fences(args[1])
+    result = core.add_fixed_test(name, value)
+    if result == "ok":
+        storage.record_admin_event("telegram", update.effective_user.id, "addtest", name)
+        await update.message.reply_text("✅ Đã thêm test cố định. Test này sẽ chạy trước test ngẫu nhiên.")
+    else:
+        await update.message.reply_text({
+            "missing": "❌ Không tìm thấy bài.",
+            "full": "❌ Bài đã có 10 test cố định.",
+            "invalid": "❌ Input test phải có nội dung và tối đa 4 KiB.",
+        }[result])
+
+
+async def cleartests(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    _, args = cmd_args(update.message.text)
+    name = " ".join(args).strip()
+    if not name or not core.set_problem_field(name, "fixed_tests", []):
+        await update.message.reply_text("❌ Không tìm thấy bài. Dùng /cleartests tên_bài.")
+        return
+    storage.record_admin_event("telegram", update.effective_user.id, "cleartests", name)
+    await update.message.reply_text("✅ Đã xóa các test cố định của bài.")
+
+
+async def setlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    parts = update.message.text.split()
+    if len(parts) != 5:
+        await update.message.reply_text("Cú pháp: /setlimit tên_bài số_test giây RAM_MiB (1–10, 1–2, 64–128)")
+        return
+    try:
+        count, seconds, memory = map(int, parts[2:])
+    except ValueError:
+        await update.message.reply_text("❌ Các giới hạn phải là số nguyên.")
+        return
+    name = parts[1]
+    if not core.set_limits(name, count, seconds, memory):
+        await update.message.reply_text("❌ Không tìm thấy bài hoặc giới hạn ngoài khoảng cho phép.")
+        return
+    storage.record_admin_event("telegram", update.effective_user.id, "setlimit", name)
+    await update.message.reply_text(f"✅ {count} test, {seconds} giây/test, {memory} MiB.")
+
+
+async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    parts = update.message.text.split()
+    if len(parts) != 3 or parts[2].lower() not in ("on", "off"):
+        await update.message.reply_text("Cú pháp: /publish tên_bài on|off")
+        return
+    name, enabled = parts[1], parts[2].lower() == "on"
+    if not core.set_problem_field(name, "published", enabled):
+        await update.message.reply_text("❌ Không tìm thấy bài.")
+        return
+    storage.record_admin_event("telegram", update.effective_user.id, "publish", name)
+    await update.message.reply_text("✅ Bài đã công bố." if enabled else "✅ Bài đã ẩn với học sinh.")
 
 
 async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -815,8 +951,13 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Chạy code của bạn với input vừa nhập bằng lệnh /input.\n\n"
         "<b>5. Nộp bài (Submit)</b>\n"
         "<code>/submit tên_bài</code> + code trong khối ```\n"
-        "Bot sẽ tự động sinh test, chấm code của bạn (10 test cases) và báo kết quả chi tiết.\n"
-        "Mẹo: bấm nút 📝 <b>Nộp bài</b> dưới mỗi đề, rồi bấm nút mở khung để nhập code cho đẹp.",
+        "Bot chấm số test đã cấu hình cho bài và báo kết quả chi tiết.\n"
+        "Mẹo: bấm nút 📝 <b>Nộp bài</b> dưới mỗi đề, rồi bấm nút mở khung để nhập code cho đẹp.\n\n"
+        "<b>6. Nộp file C++</b>\nGửi file .cpp (tối đa 64 KiB) kèm chú thích "
+        "<code>/submit tên_bài</code>.\n\n"
+        "<b>7. Kết quả</b>\n<code>/history</code> xem lịch sử; "
+        "<code>/lastfail</code> xem input WA gần nhất; "
+        "<code>/leaderboard</code> xem số bài AC.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -834,10 +975,15 @@ async def admin_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Code chuẩn sẽ được chạy với test sinh ra để lấy output đúng.\n\n"
         "<b>4. Thêm code sinh test (Generator)</b>\n"
         "<code>/gen tên_bài</code> + code trong khối ```\n"
-        "Chương trình sinh input ngẫu nhiên, tự tạo 10 test cases.\n\n"
+        "Chương trình sinh input ngẫu nhiên cho số test được cấu hình.\n\n"
         "<b>5. Gán chuyên đề cho bài tập</b>\n"
         "<code>/category tên_bài tên_chuyên_đề</code>\n"
-        "Ví dụ: <code>/category bai1 Quy hoạch động</code>",
+        "Ví dụ: <code>/category bai1 Quy hoạch động</code>\n\n"
+        "<b>6. Test và công bố</b>\n"
+        "<code>/addtest tên_bài input</code> thêm test cố định (tối đa 10).\n"
+        "<code>/cleartests tên_bài</code> xóa test cố định.\n"
+        "<code>/setlimit tên_bài số_test giây RAM_MiB</code> đặt giới hạn.\n"
+        "<code>/publish tên_bài on|off</code> công bố/ẩn bài.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -921,6 +1067,42 @@ async def reload_reminder(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=int(NOTIFY_CHAT_ID), text="Lâm ơi, reload server đi")
 
 
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.effective_message.reply_text("Nhắn riêng bot để xem lịch sử của bạn.")
+        return
+    rows = storage.recent_submissions("telegram", update.effective_user.id)
+    lines = [f"{html.escape(name)}: {result.upper()} · seed {seed}"
+             for name, result, seed, _ in rows]
+    await update.effective_message.reply_text(
+        "\n".join(lines) if lines else "Bạn chưa nộp bài nào.",
+        parse_mode=ParseMode.HTML)
+
+
+async def lastfail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.effective_message.reply_text("Nhắn riêng bot để xem input lỗi của bạn.")
+        return
+    row = storage.last_failure("telegram", update.effective_user.id)
+    if not row:
+        await update.effective_message.reply_text("Bạn chưa có lần nộp WA nào.")
+        return
+    name, seed, inp, expected = row
+    await update.effective_message.reply_text(
+        f"❌ <b>{html.escape(name)}</b> · seed <code>{seed}</code>\n"
+        f"<b>Input:</b>\n{pre_limited(inp or '', 1400)}\n"
+        f"<b>Output chuẩn:</b>\n{pre_limited(expected or '', 1400)}",
+        parse_mode=ParseMode.HTML)
+
+
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = storage.leaderboard()
+    lines = [f"{i}. {platform}:{html.escape(uid)} — {score} bài AC"
+             for i, (platform, uid, score) in enumerate(rows, 1)]
+    await update.effective_message.reply_text(
+        "\n".join(lines) if lines else "Chưa có bài AC.", parse_mode=ParseMode.HTML)
+
+
 def register_handlers(app):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("chat", chat))
@@ -932,6 +1114,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("checker", checker))
     app.add_handler(CommandHandler("show", show))
     app.add_handler(CommandHandler("submit", submit))
+    app.add_handler(MessageHandler(filters.Document.ALL, submit_document))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_web_app_data))
     app.add_handler(CommandHandler("input", input_cmd))
     app.add_handler(CommandHandler("run", run))
@@ -939,8 +1122,15 @@ def register_handlers(app):
     app.add_handler(CallbackQueryHandler(problems_menu, pattern=r"^prob:"))
     app.add_handler(CallbackQueryHandler(webapp_menu, pattern=r"^wasub:"))
     app.add_handler(CommandHandler("category", category))
+    app.add_handler(CommandHandler("addtest", addtest))
+    app.add_handler(CommandHandler("cleartests", cleartests))
+    app.add_handler(CommandHandler("setlimit", setlimit))
+    app.add_handler(CommandHandler("publish", publish))
     app.add_handler(CommandHandler("guide", guide))
     app.add_handler(CommandHandler("admin_guide", admin_guide))
     app.add_handler(CommandHandler("how", how))
+    app.add_handler(CommandHandler("history", history))
+    app.add_handler(CommandHandler("lastfail", lastfail))
+    app.add_handler(CommandHandler("leaderboard", leaderboard))
     if app.job_queue:
         app.job_queue.run_repeating(reload_reminder, interval=48 * 3600, first=48 * 3600)

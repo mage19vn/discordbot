@@ -1,7 +1,9 @@
 import asyncio
 import os
+import sys
 
 from dotenv import load_dotenv
+from config import check_config
 
 load_dotenv()
 
@@ -49,6 +51,17 @@ async def main():
 
 
 if __name__ == "__main__":
+    errors, warnings = check_config()
+    for warning in warnings:
+        print("Cảnh báo:", warning)
+    if "--check" in sys.argv:
+        print("Cấu hình:", "OK" if not errors else "CHƯA HỢP LỆ")
+    if errors:
+        for error in errors:
+            print("Lỗi cấu hình:", error)
+        raise SystemExit(1)
+    if "--check" in sys.argv:
+        raise SystemExit(0)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

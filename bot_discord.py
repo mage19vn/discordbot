@@ -7,6 +7,8 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 import core
+import access
+import storage
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -118,9 +120,11 @@ async def Haogay(ctx):
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def create(ctx, *, name: str):
     name = name.strip()
-    if core.create_problem(name):
+    if core.create_problem(name, ctx.author.id):
+        storage.record_admin_event("discord", ctx.author.id, "create", name)
         desc, color = f"✅ **Thành công:** Đã tạo bài `{name}`.", discord.Color.green()
     else:
         desc, color = f"❌ **Lỗi:** Có bài tên `{name}` rồi nhen.", discord.Color.red()
@@ -130,6 +134,7 @@ async def create(ctx, *, name: str):
 async def _set_field(ctx, name: str, code: str, field: str, label: str):
     name = name.strip()
     if core.set_problem_field(name, field, core.strip_fences(code)):
+        storage.record_admin_event("discord", ctx.author.id, field, name)
         desc = f"✅ **Thành công:** Đã cập nhật {label} cho bài `{name}`."
         color = discord.Color.green()
     else:
@@ -139,21 +144,25 @@ async def _set_field(ctx, name: str, code: str, field: str, label: str):
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def solution(ctx, name: str, *, code: str):
     await _set_field(ctx, name, code, "solution", "Code Giải (Solution)")
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def gen(ctx, name: str, *, code: str):
     await _set_field(ctx, name, code, "gen_test", "Code Sinh Test (Generator)")
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def question(ctx, name: str, *, code: str):
     await _set_field(ctx, name, code, "question", "Đề Bài")
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def checker(ctx, name: str, *, code: str):
     await _set_field(ctx, name, code, "checker", "Code Checker")
 
@@ -161,7 +170,7 @@ async def checker(ctx, name: str, *, code: str):
 @bot.command()
 async def show(ctx, name: str):
     name = name.strip()
-    p = core.get_problem(name)
+    p = core.visible_problem(name, "discord", ctx.author.id)
     if p is None:
         await ctx.send(embed=discord.Embed(
             description=f"❌ **Lỗi:** Không tìm thấy bài `{name}`.",
@@ -187,7 +196,7 @@ async def _safe_edit_discord(status_msg, embed):
 async def _run_judge(name, code, author, on_update):
     """Chạy core.judge và báo tiến trình qua on_update(embed) —
     dùng chung cho lệnh >submit và Modal nộp bài."""
-    async for ev in core.judge(name, code):
+    async for ev in core.judge(name, code, "discord", author.id):
         t = ev["t"]
         if t == "not_found":
             await on_update(discord.Embed(
@@ -198,7 +207,7 @@ async def _run_judge(name, code, author, on_update):
         if t == "status":
             if ev["msg"] == "testing":
                 await on_update(discord.Embed(
-                    description="🚀 **Code biên dịch thành công. Đang chạy bộ 10 Test Cases...**",
+                    description=f"🚀 **Code biên dịch thành công. Đang chạy {ev.get('count', 10)} test...**",
                     color=discord.Color.blue(),
                 ))
             continue
@@ -220,6 +229,10 @@ async def _run_judge(name, code, author, on_update):
                 "sol_tle": "❌ **Lỗi hệ thống:** TLE ở code Solution chuẩn.",
                 "sol_rte": f"❌ **Lỗi hệ thống:** Code Solution chuẩn gặp lỗi (RTE).\n```\n{ev.get('detail', '')[:1000]}\n```",
                 "no_compiler": "❌ **Lỗi hệ thống:** Máy chấm chưa cài `g++`, không biên dịch được. Báo admin cài giúp nhé!",
+                "gen_missing": "❌ Bài chưa có đủ test cố định và chưa có generator.",
+                "sandbox": "❌ Trình chạy chấm bài chưa sẵn sàng. Báo quản trị viên kiểm tra cấu hình.",
+                "busy": "⏳ Máy chấm đang bận. Vui lòng nộp lại sau.",
+                "code_limit": "❌ Code phải có nội dung và không vượt quá 64 KiB.",
             }
             await on_update(discord.Embed(
                 description=msgs[ev["msg"]], color=discord.Color.red(),
@@ -235,7 +248,8 @@ async def _run_judge(name, code, author, on_update):
         if t == "tle":
             await on_update(discord.Embed(
                 description=f"{random.choice(MESSAGE_REPLY_TEMPLATES['tle'])}\n"
-                            f"❌ **Time Limit Exceeded (TLE) tại Test {ev['test']}** (Code chạy quá 2 giây).",
+                            f"❌ **Time Limit Exceeded (TLE) tại Test {ev['test']}** "
+                            f"(quá {ev.get('limit', 2)} giây).",
                 color=discord.Color.red(),
             ))
             return
@@ -245,7 +259,8 @@ async def _run_judge(name, code, author, on_update):
                 description=f"{random.choice(MESSAGE_REPLY_TEMPLATES['wa'])}\n"
                             f"**Input sinh ra:**\n```\n{ev['inp'][:500]}\n```\n"
                             f"**Output mong đợi:**\n```\n{ev['sol'][:500]}\n```\n"
-                            f"**Output của bạn:**\n```\n{ev['out'][:500]}\n```",
+                            f"**Output của bạn:**\n```\n{ev['out'][:500]}\n```\n"
+                            f"Seed: `{ev.get('seed', '')}`",
                 color=discord.Color.red(),
             ))
             return
@@ -254,7 +269,7 @@ async def _run_judge(name, code, author, on_update):
                 title="✅ ACCEPTED!",
                 description=f"{random.choice(MESSAGE_REPLY_TEMPLATES['ac'])}\n"
                             f"Chúc mừng <@{author.id}>, code của bạn đã vượt qua "
-                            f"10/10 test cases bài `{name}`.",
+                            f"{ev.get('count', 10)}/{ev.get('count', 10)} test bài `{name}`.",
                 color=discord.Color.green(),
             ))
             return
@@ -320,6 +335,9 @@ async def submit(ctx, name: str, *, code: str):
 @bot.command(name="input")
 async def input_cmd(ctx, *, inp_temp: str):
     inp = inp_temp.strip().replace("```", "")
+    if not access.valid_input(inp):
+        await ctx.send("❌ Input vượt quá 64 KiB.")
+        return
     core.set_user_input(str(ctx.author.id), inp)
     await ctx.send(embed=discord.Embed(
         description=f"✅ **Đã nhận input:**\n```\n{inp}\n```",
@@ -359,6 +377,8 @@ async def run(ctx, *, code: str):
             description="⚠️ **Chương trình chạy xong nhưng không in ra gì.**",
             color=discord.Color.orange(),
         ))
+    elif t == "sys":
+        await ctx.send("❌ Máy chấm chưa sẵn sàng hoặc code/input quá dài.")
     else:
         out = r["output"] + ("..." if r["truncated"] else "")
         await ctx.send(embed=discord.Embed(
@@ -369,7 +389,7 @@ async def run(ctx, *, code: str):
 
 @bot.command()
 async def problems(ctx):
-    cats = core.list_problems()
+    cats = core.list_visible_problems("discord", ctx.author.id)
     if not cats:
         await ctx.send("Hiện tại chưa có bài tập nào.")
         return
@@ -388,9 +408,11 @@ async def problems(ctx):
 
 
 @bot.command()
+@commands.check(lambda ctx: access.discord_admin(ctx.author))
 async def category(ctx, name: str, *, cat: str):
     name, cat = name.strip(), cat.strip()
     if core.set_category(name, cat):
+        storage.record_admin_event("discord", ctx.author.id, "category", name)
         desc = f"✅ **Thành công:** Đã cập nhật chuyên đề `{cat}` cho bài `{name}`."
         color = discord.Color.green()
     else:
@@ -494,8 +516,71 @@ async def before_reload_reminder():
     await bot.wait_until_ready()
 
 
+@bot.command(name="history")
+async def history(ctx):
+    rows = storage.recent_submissions("discord", ctx.author.id)
+    lines = [f"{name}: {result.upper()}" for name, result, _, _ in rows]
+    await ctx.send("\n".join(lines) if lines else "Bạn chưa nộp bài nào.")
+
+
+@bot.command(name="leaderboard")
+async def leaderboard(ctx):
+    rows = storage.leaderboard()
+    lines = [f"{i}. {platform}:{uid} — {score} bài AC"
+             for i, (platform, uid, score) in enumerate(rows, 1)]
+    await ctx.send("\n".join(lines) if lines else "Chưa có bài AC.")
+
+
+@bot.tree.command(name="bai", description="Xem đề bài")
+async def slash_problem(interaction: discord.Interaction, name: str):
+    p = core.visible_problem(name.strip(), "discord", interaction.user.id)
+    if not p:
+        await interaction.response.send_message("Không tìm thấy bài.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        embed=discord.Embed(title=f"📝 {name}",
+                            description=(p.get("question") or "Chưa có đề bài.")[:4000]),
+        view=SubmitView(name))
+
+
+@slash_problem.autocomplete("name")
+async def problem_names(interaction: discord.Interaction, current: str):
+    names = [name for group in core.list_visible_problems("discord", interaction.user.id).values()
+             for name in group]
+    return [discord.app_commands.Choice(name=name[:100], value=name)
+            for name in names if current.casefold() in name.casefold() and len(name) <= 100][:25]
+
+
+@bot.tree.command(name="lichsu", description="Xem lịch sử nộp bài của bạn")
+async def slash_history(interaction: discord.Interaction):
+    rows = storage.recent_submissions("discord", interaction.user.id)
+    lines = [f"{name}: {result.upper()}" for name, result, _, _ in rows]
+    await interaction.response.send_message(
+        "\n".join(lines) if lines else "Bạn chưa nộp bài nào.", ephemeral=True)
+
+
+@bot.tree.command(name="bangxephang", description="Bảng xếp hạng")
+async def slash_leaderboard(interaction: discord.Interaction):
+    rows = storage.leaderboard()
+    lines = [f"{i}. {platform}:{uid} — {score} bài AC"
+             for i, (platform, uid, score) in enumerate(rows, 1)]
+    await interaction.response.send_message("\n".join(lines) if lines else "Chưa có bài AC.")
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("⛔ Lệnh này chỉ dành cho quản trị viên.")
+    else:
+        raise error
+
+
 async def setup_hook():
     reload_reminder.start()
+    try:
+        await bot.tree.sync()
+    except discord.HTTPException as exc:
+        print(f"Không đồng bộ được slash commands: {exc}")
 
 
 bot.setup_hook = setup_hook

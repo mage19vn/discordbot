@@ -1,39 +1,18 @@
 import asyncio
-import json
 import os
+import random
 import subprocess
 import tempfile
 
-DATA_FILE = "data.json"
+import storage
+import access
+from sandbox import BACKEND, SandboxUnavailable, run_compiler, run_program
+
 NUM_TESTS = 10
 TIMEOUT = 2
 COMPILE_TIMEOUT = 30  # giây, cho mỗi lần gọi g++
-
-_problems = {}
-_user_inputs = {}
-
-
-def load_data():
-    global _problems, _user_inputs
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                _problems = data.get("de", {})
-                _user_inputs = data.get("inp_data", {})
-        except (json.JSONDecodeError, ValueError, IOError):
-            _problems, _user_inputs = {}, {}
-    else:
-        _problems, _user_inputs = {}, {}
-
-
-def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump({"inp_data": _user_inputs, "de": _problems},
-                  f, ensure_ascii=False, indent=4)
-
-
-load_data()
+_judge_slots = asyncio.Semaphore(max(1, int(os.getenv("MAGOJ_MAX_JOBS") or "1")))
+storage.initialize()
 
 
 def strip_fences(code: str) -> str:
@@ -44,59 +23,74 @@ def strip_fences(code: str) -> str:
     return code.replace("```cpp\n", "").replace("```", "")
 
 
-def create_problem(name: str) -> bool:
-    if name in _problems:
-        return False
-    _problems[name] = {"question": "", "solution": "", "gen_test": "",
-                       "checker": "", "category": "Chưa phân loại"}
-    save_data()
-    return True
+def create_problem(name: str, author=None) -> bool:
+    return storage.create_problem(name, author)
 
 
 def set_problem_field(name: str, field: str, code: str) -> bool:
-    if name not in _problems:
-        return False
-    _problems[name][field] = code
-    save_data()
-    return True
+    return storage.set_field(name, field, code)
 
 
 def get_problem(name: str):
-    return _problems.get(name)
+    return storage.get_problem(name)
+
+
+def visible_problem(name, platform, user_id):
+    problem = get_problem(name)
+    if problem and (problem.get("published", True) or access.admin_id(platform, user_id)):
+        return problem
+    return None
 
 
 def list_problems() -> dict:
+    return storage.list_problems()
+
+
+def list_visible_problems(platform, user_id):
     cats = {}
-    for name, data in _problems.items():
-        cats.setdefault(data.get("category", "Chưa phân loại"), []).append(name)
+    for category, names in list_problems().items():
+        for name in names:
+            if visible_problem(name, platform, user_id):
+                cats.setdefault(category, []).append(name)
     return cats
 
 
 def set_category(name: str, cat: str) -> bool:
-    if name not in _problems:
-        return False
-    _problems[name]["category"] = cat
-    save_data()
-    return True
+    return storage.set_field(name, "category", cat)
 
 
 def set_user_input(user_id: str, inp: str):
-    _user_inputs[user_id] = inp
-    save_data()
+    storage.set_input(user_id, inp)
 
 
 def get_user_input(user_id: str) -> str:
-    return _user_inputs.get(user_id, "")
+    return storage.get_input(user_id)
 
 
-async def is_ac(inp: str, sol: str, out: str, checker_exe: str) -> bool:
+def add_fixed_test(name: str, value: str):
+    if not value.strip() or len(value.encode("utf-8")) > 4096:
+        return "invalid"
+    return storage.append_fixed_test(name, value)
+
+
+def set_limits(name: str, test_count: int, time_limit: int, memory_limit: int):
+    if not (1 <= test_count <= 10 and 1 <= time_limit <= 2 and 64 <= memory_limit <= 128):
+        return False
+    if get_problem(name) is None:
+        return False
+    return storage.set_fields(name, {"test_count": test_count,
+                                     "time_limit": time_limit,
+                                     "memory_limit": memory_limit})
+
+
+async def is_ac(inp: str, sol: str, out: str, checker_exe: str,
+                timeout=TIMEOUT, memory=128) -> bool:
     if not checker_exe:
         return sol.strip() == out.strip()
     check = inp + "\nENDINP\n" + sol + "\nENDOUT\n" + out
     try:
         proc = await asyncio.to_thread(
-            subprocess.run, [checker_exe], input=check,
-            capture_output=True, text=True, timeout=TIMEOUT,
+            run_program, checker_exe, check, timeout, memory=memory,
         )
         return proc.returncode == 0 and proc.stdout.strip() == "AC"
     except subprocess.TimeoutExpired:
@@ -108,8 +102,7 @@ async def _compile(src: str, exe: str):
     Hết thời gian thì giả lập lỗi biên dịch để caller báo CE như thường."""
     try:
         return await asyncio.to_thread(
-            subprocess.run, ["g++", src, "-O2", "-o", exe],
-            capture_output=True, text=True, timeout=COMPILE_TIMEOUT,
+            run_compiler, src, exe, COMPILE_TIMEOUT,
         )
     except FileNotFoundError:
         return None
@@ -120,27 +113,67 @@ async def _compile(src: str, exe: str):
         )
 
 
-async def _run(exe: str, inp: str):
+async def _run(exe: str, inp: str, timeout=TIMEOUT, memory=128):
     return await asyncio.to_thread(
-        subprocess.run, [exe], input=inp,
-        capture_output=True, text=True, timeout=TIMEOUT,
+        run_program, exe, inp, timeout, memory=memory,
     )
 
 
-async def judge(name: str, code: str):
-    p = get_problem(name)
+async def judge(name: str, code: str, platform=None, user_id=None):
+    if not access.valid_code(code):
+        yield {"t": "sys", "msg": "code_limit"}
+        return
+    try:
+        await asyncio.wait_for(_judge_slots.acquire(), timeout=3)
+    except asyncio.TimeoutError:
+        yield {"t": "sys", "msg": "busy"}
+        return
+    seed = random.SystemRandom().randrange(1, 2**62)
+    held = True
+    try:
+        try:
+            async for event in _judge_unqueued(name, code, seed, platform, user_id):
+                if event["t"] not in ("status", "not_found"):
+                    event["seed"] = seed
+                if event["t"] != "status":
+                    if platform and user_id is not None and event["t"] != "not_found":
+                        storage.record_submission(platform, user_id, name, event["t"], seed, event)
+                    _judge_slots.release()
+                    held = False
+                yield event
+        except SandboxUnavailable:
+            if platform and user_id is not None:
+                storage.record_submission(platform, user_id, name, "sys", seed)
+            _judge_slots.release()
+            held = False
+            yield {"t": "sys", "msg": "sandbox", "seed": seed}
+    finally:
+        if held:
+            _judge_slots.release()
+
+
+async def _judge_unqueued(name: str, code: str, seed: int, platform=None, user_id=None):
+    p = visible_problem(name, platform, user_id)
     if p is None:
         yield {"t": "not_found"}
         return
 
-    yield {"t": "status", "msg": "compiling"}
+    test_count = p.get("test_count", NUM_TESTS)
+    timeout = p.get("time_limit", TIMEOUT)
+    memory = p.get("memory_limit", 128)
+    fixed_tests = p.get("fixed_tests", [])[:test_count]
+    yield {"t": "status", "msg": "compiling", "count": test_count}
 
     with tempfile.TemporaryDirectory() as d:
+        if BACKEND == "docker":
+            os.chmod(d, 0o777)  # container user needs access to its only mounted directory
         cpp, sol_f, gen_f = (os.path.join(d, n) for n in ("temp.cpp", "solution.cpp", "gen_test.cpp"))
         exe, exe_sol, exe_gen = (os.path.join(d, n) for n in ("temp", "solution", "gen_test"))
         for path, content in ((cpp, code), (sol_f, p["solution"]), (gen_f, p["gen_test"])):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
+            if BACKEND == "docker":
+                os.chmod(path, 0o644)
 
         checker_exe = ""
         if p["checker"]:
@@ -148,6 +181,8 @@ async def judge(name: str, code: str):
             checker_exe = os.path.join(d, "checker")
             with open(chk_f, "w", encoding="utf-8") as f:
                 f.write(p["checker"])
+            if BACKEND == "docker":
+                os.chmod(chk_f, 0o644)
             r = await _compile(chk_f, checker_exe)
             if r is None:
                 yield {"t": "sys", "msg": "no_compiler"}
@@ -170,32 +205,40 @@ async def judge(name: str, code: str):
         if r.returncode != 0:
             yield {"t": "ce", "who": "solution", "stderr": r.stderr}
             return
-        r = await _compile(gen_f, exe_gen)
-        if r is None:
-            yield {"t": "sys", "msg": "no_compiler"}
-            return
-        if r.returncode != 0:
-            yield {"t": "ce", "who": "gen", "stderr": r.stderr}
-            return
-
-        yield {"t": "status", "msg": "testing"}
-
-        for i in range(1, NUM_TESTS + 1):
-            try:
-                g = await _run(exe_gen, "")
-            except subprocess.TimeoutExpired:
-                yield {"t": "sys", "msg": "gen_tle"}
+        if len(fixed_tests) < test_count:
+            if not p["gen_test"].strip():
+                yield {"t": "sys", "msg": "gen_missing"}
                 return
-            if g.returncode != 0:
-                yield {"t": "sys", "msg": "gen_rte", "detail": g.stderr}
+            r = await _compile(gen_f, exe_gen)
+            if r is None:
+                yield {"t": "sys", "msg": "no_compiler"}
                 return
-            inp = g.stdout
+            if r.returncode != 0:
+                yield {"t": "ce", "who": "gen", "stderr": r.stderr}
+                return
+
+        yield {"t": "status", "msg": "testing", "count": test_count}
+
+        for i in range(1, test_count + 1):
+            if i <= len(fixed_tests):
+                inp = fixed_tests[i - 1]
+            else:
+                try:
+                    g = await asyncio.to_thread(run_program, exe_gen, "", timeout,
+                                                seed + i, memory)
+                except subprocess.TimeoutExpired:
+                    yield {"t": "sys", "msg": "gen_tle"}
+                    return
+                if g.returncode != 0:
+                    yield {"t": "sys", "msg": "gen_rte", "detail": g.stderr}
+                    return
+                inp = g.stdout
             if inp.strip() == "":
                 yield {"t": "sys", "msg": "gen_empty"}
                 return
 
             try:
-                s = await _run(exe_sol, inp)
+                s = await _run(exe_sol, inp, timeout, memory)
             except subprocess.TimeoutExpired:
                 yield {"t": "sys", "msg": "sol_tle"}
                 return
@@ -204,28 +247,48 @@ async def judge(name: str, code: str):
                 return
 
             try:
-                u = await _run(exe, inp)
+                u = await _run(exe, inp, timeout, memory)
             except subprocess.TimeoutExpired:
-                yield {"t": "tle", "test": i}
+                yield {"t": "tle", "test": i, "limit": timeout}
                 return
             if u.returncode != 0 or u.stderr != "":
                 yield {"t": "rte", "test": i, "stderr": u.stderr}
                 return
-            if not await is_ac(inp, s.stdout, u.stdout, checker_exe):
+            if not await is_ac(inp, s.stdout, u.stdout, checker_exe, timeout, memory):
                 yield {"t": "wa", "test": i,
                        "inp": inp, "sol": s.stdout, "out": u.stdout}
                 return
 
-        yield {"t": "ac"}
+        yield {"t": "ac", "count": test_count}
 
 
 async def run_once(code: str, inp: str):
+    if not access.valid_code(code) or not access.valid_input(inp):
+        return {"t": "sys", "msg": "code_limit"}
+    try:
+        await asyncio.wait_for(_judge_slots.acquire(), timeout=3)
+    except asyncio.TimeoutError:
+        return {"t": "sys", "msg": "busy"}
+    try:
+        return await _run_once_unqueued(code, inp)
+    finally:
+        _judge_slots.release()
+
+
+async def _run_once_unqueued(code: str, inp: str):
     with tempfile.TemporaryDirectory() as d:
+        if BACKEND == "docker":
+            os.chmod(d, 0o777)
         cpp = os.path.join(d, "temp.cpp")
         exe = os.path.join(d, "temp")
         with open(cpp, "w", encoding="utf-8") as f:
             f.write(code)
-        r = await _compile(cpp, exe)
+        if BACKEND == "docker":
+            os.chmod(cpp, 0o644)
+        try:
+            r = await _compile(cpp, exe)
+        except SandboxUnavailable:
+            return {"t": "sys", "msg": "sandbox"}
         if r is None:
             return {"t": "ce", "stderr": "Máy chấm chưa cài g++, không biên dịch được. Báo admin cài giúp nhé!"}
         if r.returncode != 0:
@@ -234,6 +297,8 @@ async def run_once(code: str, inp: str):
             u = await _run(exe, inp)
         except subprocess.TimeoutExpired:
             return {"t": "tle"}
+        except SandboxUnavailable:
+            return {"t": "sys", "msg": "sandbox"}
         if u.returncode != 0:
             return {"t": "rte", "stderr": u.stderr}
         if u.stdout == "" and u.stderr == "":
@@ -249,13 +314,16 @@ int main() {
     int k;
     cin >> k;
     // Xu ly bai toan
-    cout << k * 2 << '\\n';
+    cout << k * 2 << "\\n";
 }"""
 
 SAMPLE_GEN = """#include<bits/stdc++.h>
 using namespace std;
 
-mt19937_64 rng(chrono::steady_clock::now().time_since_epoch().count());
+mt19937_64 rng([] {
+    const char* seed = getenv("MAGOJ_SEED");
+    return seed ? stoull(seed) : (unsigned long long)chrono::steady_clock::now().time_since_epoch().count();
+}());
 
 long long rand_int(long long L, long long R) {
     return uniform_int_distribution<long long>(L, R)(rng);
