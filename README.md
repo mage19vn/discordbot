@@ -152,9 +152,10 @@ Telegraph. Giới hạn test, thời gian và RAM lấy từ `test_count`, `time
 và `question`. File cũ có `question` Markdown với các mục `**Input**`,
 `**Output**`, `**Ví dụ**` vẫn được nhập nguyên nội dung; cache Telegraph
 `page_url`/`page_hash` cũ được bỏ qua để tạo lại khi xem đề.
-Các bài đã nhập trước bản cập nhật này vẫn giữ nguyên nội dung trong SQLite;
-muốn đổi đề của bài đó, dùng `/question TÊN_BÀI` hoặc nhập bài dưới tên mới.
-`/importjson` không ghi đè bài trùng tên.
+Các bài đã nhập trước bản cập nhật này vẫn giữ nguyên nội dung trong SQLite.
+Để sửa nhanh toàn bộ đề Markdown của một bài, dùng `/question TÊN_BÀI` kèm
+nội dung mới. Muốn sửa lại các phần trong JSON, chỉnh file rồi gửi cho bot
+với caption `/updatejson` như hướng dẫn dưới đây.
 
 Nhắn **riêng** bot file `.json`, đặt caption chính xác là `/importjson`. Bot
 kiểm tra quyền admin và toàn bộ file trước khi nhập vào SQLite. Nếu sai định
@@ -166,6 +167,20 @@ generator. Solution trong JSON chứa code và đáp án chuẩn, nên không g�
 trong nhóm hoặc chia sẻ công khai. Dữ liệu mới được lưu trong `data.sqlite3`;
 không sửa file `data.json` gốc. Khi cập nhật code trên KataBump, giữ nguyên
 database này.
+
+### Sửa bài đã có qua Telegram
+
+Nhắn riêng bot file `.json` đã chỉnh sửa, đặt caption **`/updatejson`**.
+`name` phải trùng tên bài đang có. File cập nhật phải đủ `category`,
+`statement` (hoặc `question`), `solution`, `gen_test`, `checker`,
+`fixed_tests`, `test_count`, `time_limit`, `memory_limit` và `published`; dùng
+file JSON đã nhập trước đó làm mẫu. Bot kiểm tra toàn bộ file trước khi ghi.
+Nếu một tên bài chưa tồn tại hoặc file thiếu trường, không bài nào bị thay
+đổi. Cập nhật thành công giữ nguyên tác giả, ngày tạo, lịch sử nộp và bảng
+xếp hạng, đồng thời tăng phiên bản và tạo lại trang Telegraph khi xem đề.
+`published` trong file quyết định bài có hiện cho học sinh không, nên kiểm
+tra giá trị này trước khi gửi. `/importjson` vẫn chỉ tạo bài mới và từ chối
+tên trùng.
 
 ## Phát triển và kiểm thử
 

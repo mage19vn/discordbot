@@ -62,7 +62,7 @@ def _statement_question(name, statement):
     return question
 
 
-def parse_problem_json(data: bytes):
+def parse_problem_json(data: bytes, *, require_full=False):
     if len(data) > MAX_JSON_BYTES:
         raise ValueError("File JSON vượt quá 256 KiB.")
     try:
@@ -95,6 +95,14 @@ def parse_problem_json(data: bytes):
         if name in seen:
             raise ValueError(f"Tên bài {name} xuất hiện nhiều lần trong file.")
         seen.add(name)
+        if require_full:
+            required = {"category", "solution", "gen_test", "checker", "fixed_tests",
+                        "test_count", "time_limit", "memory_limit", "published"}
+            missing = required - set(item)
+            if "statement" not in item and "question" not in item:
+                missing.add("statement hoặc question")
+            if missing:
+                raise ValueError(f"Bài {name}: file cập nhật thiếu {', '.join(sorted(missing))}.")
         unknown = set(item) - _FIELDS - _LEGACY_CACHE - {"name"}
         if unknown:
             raise ValueError(f"Bài {name}: trường không hỗ trợ: {', '.join(sorted(unknown))}.")

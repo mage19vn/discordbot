@@ -24,6 +24,34 @@ import storage  # noqa: E402
 
 
 class StorageTests(unittest.TestCase):
+    def test_json_update_preserves_history_and_rejects_partial_batch(self):
+        sample = json.loads((Path(__file__).resolve().parents[1] /
+                             "examples" / "problem.json").read_text(encoding="utf-8"))
+        sample["name"] = "update_existing"
+        parsed = problem_import.parse_problem_json(json.dumps(sample).encode())
+        storage.import_problems(parsed, "telegram", "7")
+        storage.record_submission("telegram", "50", "update_existing", "ac", 123)
+        storage.set_fields("update_existing", {"page_url": "https://example.org/old",
+                                               "page_hash": "old"})
+        before = storage.get_problem("update_existing")
+        sample["statement"]["description"] = "Nội dung đã sửa."
+        changed = problem_import.parse_problem_json(json.dumps(sample).encode(),
+                                                    require_full=True)
+        with self.assertRaisesRegex(ValueError, "chưa tồn tại"):
+            storage.update_problems(changed + [("missing_update", changed[0][1])],
+                                    "telegram", "8")
+        self.assertEqual(storage.get_problem("update_existing"), before)
+        storage.update_problems(changed, "telegram", "8")
+        after = storage.get_problem("update_existing")
+        self.assertIn("Nội dung đã sửa.", after["question"])
+        self.assertEqual(after["version"], before["version"] + 1)
+        self.assertEqual(after["author"], "7")
+        self.assertEqual(after["created_at"], before["created_at"])
+        self.assertNotIn("page_url", after)
+        self.assertNotIn("page_hash", after)
+        self.assertEqual(storage.recent_submissions("telegram", "50")[0][0],
+                         "update_existing")
+
     def test_json_problem_import_is_atomic_and_private_by_default(self):
         sample = Path(__file__).resolve().parents[1] / "examples" / "problem.json"
         parsed = problem_import.parse_problem_json(sample.read_bytes())
@@ -66,6 +94,9 @@ class StorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "input"):
             problem_import.parse_problem_json(b'{"name":"bad","statement":'
                                               b'{"title":"T","description":"d","output":"o"}}')
+        with self.assertRaisesRegex(ValueError, "thiếu"):
+            problem_import.parse_problem_json(b'{"name":"bad","question":"Q"}',
+                                              require_full=True)
         legacy = {"de": {"legacy_json": {"question": "Q", "solution": "S",
                                           "page_url": "old"}}, "inp_data": {"7": "x"}}
         parsed = problem_import.parse_problem_json(json.dumps(legacy).encode())
@@ -231,6 +262,27 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
             context.bot.get_file.reset_mock()
             await bot_telegram.submit_document(update, context)
             context.bot.get_file.assert_not_awaited()
+
+    async def test_json_document_can_update_existing_problem(self):
+        sample = json.loads((Path(__file__).resolve().parents[1] /
+                             "examples" / "problem.json").read_text(encoding="utf-8"))
+        sample["name"] = "update_via_bot"
+        storage.import_problems(problem_import.parse_problem_json(json.dumps(sample).encode()),
+                                "telegram", "7")
+        sample["statement"]["description"] = "Đề sửa qua Telegram."
+        payload = json.dumps(sample).encode()
+        message = SimpleNamespace(caption="/updatejson", document=SimpleNamespace(
+            file_name="problem.json", file_size=len(payload), file_id="file"),
+            reply_text=AsyncMock())
+        remote = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=bytearray(payload)))
+        context = SimpleNamespace(bot=SimpleNamespace(get_file=AsyncMock(return_value=remote)))
+        update = SimpleNamespace(message=message, effective_message=message,
+                                 effective_user=SimpleNamespace(id=7),
+                                 effective_chat=SimpleNamespace(type="private"))
+        with patch.dict(os.environ, {"TELEGRAM_ADMIN_IDS": "7"}):
+            await bot_telegram.submit_document(update, context)
+        self.assertIn("Đề sửa qua Telegram.", storage.get_problem("update_via_bot")["question"])
+        self.assertIn("Đã cập nhật", message.reply_text.await_args.args[0])
 
 
 class JudgeTests(unittest.IsolatedAsyncioTestCase):

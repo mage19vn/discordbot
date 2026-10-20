@@ -682,6 +682,15 @@ async def importjson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bài mới mặc định ở trạng thái ẩn; dùng /publish tên_bài on sau khi kiểm tra.")
 
 
+async def updatejson(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _require_admin(update):
+        return
+    await update.message.reply_text(
+        "Để sửa bài đã có, gửi file .json đầy đủ trong chat riêng với bot, "
+        "caption /updatejson. File cần giữ nguyên name và đủ các trường như "
+        "file đã nhập. Bot giữ lịch sử nộp bài và từ chối cả file nếu có bài chưa tồn tại.")
+
+
 async def importjson_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _require_admin(update):
         return
@@ -689,8 +698,10 @@ async def importjson_document(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Hãy gửi file JSON trong chat riêng với bot để giữ kín solution.")
         return
     message = update.message
-    if (message.caption or "").strip().split("@")[0] != "/importjson":
-        await message.reply_text("Gửi file .json với caption đúng là /importjson.")
+    caption = (message.caption or "").strip().split()
+    action = caption[0].split("@")[0] if len(caption) == 1 else ""
+    if action not in ("/importjson", "/updatejson"):
+        await message.reply_text("Gửi file .json với caption /importjson hoặc /updatejson.")
         return
     doc = message.document
     if doc.file_size is None or doc.file_size > problem_import.MAX_JSON_BYTES:
@@ -699,18 +710,25 @@ async def importjson_document(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         remote = await context.bot.get_file(doc.file_id)
         data = await remote.download_as_bytearray()
-        problems = problem_import.parse_problem_json(data)
-        storage.import_problems(problems, "telegram", update.effective_user.id)
+        updating = action == "/updatejson"
+        problems = problem_import.parse_problem_json(data, require_full=updating)
+        if updating:
+            storage.update_problems(problems, "telegram", update.effective_user.id)
+        else:
+            storage.import_problems(problems, "telegram", update.effective_user.id)
     except ValueError as exc:
-        await message.reply_text(f"❌ Không nhập bài: {exc}")
+        await message.reply_text(f"❌ Không {'cập nhật' if action == '/updatejson' else 'nhập'} bài: {exc}")
         return
     except TelegramError:
         await message.reply_text("❌ Không tải được file JSON từ Telegram. Hãy thử lại.")
         return
     names = ", ".join(name for name, _ in problems)
-    await message.reply_text(
-        f"✅ Đã nhập {len(problems)} bài: {names}. "
-        "Bài ẩn cần dùng /publish tên_bài on để công bố.")
+    if updating:
+        await message.reply_text(f"✅ Đã cập nhật {len(problems)} bài: {names}. Lịch sử nộp bài được giữ nguyên.")
+    else:
+        await message.reply_text(
+            f"✅ Đã nhập {len(problems)} bài: {names}. "
+            "Bài ẩn cần dùng /publish tên_bài on để công bố.")
 
 
 async def webapp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1052,7 +1070,8 @@ async def admin_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>7. Nhập bài bằng JSON</b>\n"
         "Nhắn riêng bot file .json (tối đa 256 KiB) với caption "
         "<code>/importjson</code>. Gõ /importjson để xem cú pháp. "
-        "Bài nhập mặc định ở trạng thái ẩn và không ghi đè bài cũ.",
+        "Bài nhập mặc định ở trạng thái ẩn và không ghi đè bài cũ. "
+        "Sửa bài đã có bằng file JSON đầy đủ với caption <code>/updatejson</code>.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -1178,6 +1197,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("haogay", haogay))
     app.add_handler(CommandHandler("create", create))
     app.add_handler(CommandHandler("importjson", importjson))
+    app.add_handler(CommandHandler("updatejson", updatejson))
     app.add_handler(CommandHandler("solution", solution))
     app.add_handler(CommandHandler("gen", gen))
     app.add_handler(CommandHandler("question", question))

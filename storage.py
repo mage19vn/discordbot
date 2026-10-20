@@ -102,6 +102,28 @@ def import_problems(problems, platform, user_id):
             raise ValueError("Có tên bài đã tồn tại; không bài nào trong file được nhập.") from exc
 
 
+def update_problems(problems, platform, user_id):
+    """Replace validated problem content atomically, preserving identity and history."""
+    with _lock, _connect() as db:
+        names = [name for name, _ in problems]
+        rows = db.execute(
+            f"SELECT name,body FROM problems WHERE name IN ({','.join('?' for _ in names)})",
+            names).fetchall()
+        previous = {name: json.loads(raw) for name, raw in rows}
+        missing = [name for name in names if name not in previous]
+        if missing:
+            raise ValueError(f"Bài chưa tồn tại: {', '.join(missing)}. Không bài nào được cập nhật.")
+        for name, fields in problems:
+            old = previous[name]
+            body = {**old, **fields, "version": old.get("version", 1) + 1}
+            body.pop("page_url", None)
+            body.pop("page_hash", None)
+            db.execute("UPDATE problems SET body=? WHERE name=?",
+                       (json.dumps(body, ensure_ascii=False), name))
+            db.execute("INSERT INTO admin_events(platform,user_id,action,problem) "
+                       "VALUES (?,?,?,?)", (platform, str(user_id), "updatejson", name))
+
+
 def set_field(name, field, value):
     return set_fields(name, {field: value})
 
