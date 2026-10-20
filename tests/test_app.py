@@ -16,6 +16,7 @@ os.environ["MAGOJ_JUDGE_BACKEND"] = "local"
 
 import access  # noqa: E402
 import bot_telegram  # noqa: E402
+import bot_discord  # noqa: E402
 import core  # noqa: E402
 import config  # noqa: E402
 import problem_import  # noqa: E402
@@ -251,6 +252,60 @@ class JudgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["output"], "clean")
         finally:
             del os.environ["DISCORD_TOKEN"]
+
+
+class DiscordDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_show_and_slash_share_complete_statement(self):
+        question = "```cpp\n" + "x" * 8000 + "\n```"
+        problem = {"question": question, "test_count": 2,
+                   "time_limit": 1, "version": 3}
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        with patch.object(core, "visible_problem", return_value=problem):
+            await bot_discord.show.callback(ctx, name="DEMO")
+        embeds = [call.kwargs["embed"] for call in ctx.send.await_args_list]
+        self.assertGreater(len(embeds), 1)
+        self.assertTrue(all(len(embed.description) <= 4096 for embed in embeds))
+        self.assertIn("2 test", embeds[0].footer.text)
+        self.assertIsInstance(ctx.send.await_args_list[0].kwargs["view"],
+                              bot_discord.SubmitView)
+        self.assertEqual(sum(embed.description.count("x") for embed in embeds), 8000)
+
+        response = SimpleNamespace(send_message=AsyncMock())
+        response.is_done = lambda: response.send_message.called
+        interaction = SimpleNamespace(user=SimpleNamespace(id=7), response=response,
+                                      followup=SimpleNamespace(send=AsyncMock()))
+        with patch.object(core, "visible_problem", return_value=problem):
+            await bot_discord.slash_problem.callback(interaction, "DEMO")
+        response.send_message.assert_awaited()
+        self.assertIn("2 test", response.send_message.await_args.kwargs["embed"].footer.text)
+        interaction.followup.send.assert_awaited()
+
+    async def test_category_browser_filters_and_paginates(self):
+        cats = {f"Category {i:02d}": [f"PROBLEM_{i}"] for i in range(30)}
+        self.assertEqual(bot_discord._match_category(cats, "2")[0], "Category 01")
+        self.assertEqual(bot_discord._match_category(cats, "category 29")[0], "Category 29")
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        with patch.object(core, "list_visible_problems", return_value=cats):
+            await bot_discord.problems.callback(ctx, key="29")
+        self.assertEqual(ctx.send.await_args.kwargs["view"].category, "Category 28")
+        view = bot_discord.ProblemBrowserView(7)
+        with patch.object(core, "list_visible_problems", return_value=cats):
+            first = view.render()
+            self.assertIn("Category 24", first.description)
+            self.assertNotIn("Category 25", first.description)
+            response = SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock(),
+                                       is_done=lambda: False)
+            interaction = SimpleNamespace(user=SimpleNamespace(id=7), response=response,
+                                          followup=SimpleNamespace(send=AsyncMock()))
+            await view.next_page(interaction)
+            self.assertIn("Category 29", response.edit_message.await_args.kwargs["embed"].description)
+            await view.choose(interaction, "Category 29", None)
+            self.assertEqual(view.category, "Category 29")
+        with patch.object(core, "list_visible_problems", return_value={"Category 29": ["PROBLEM_29"]}), \
+             patch.object(core, "visible_problem", return_value={"question": "Hello"}):
+            await view.choose(interaction, "PROBLEM_29", "Category 29")
+        response.send_message.assert_awaited()
+        self.assertIn("Hello", response.send_message.await_args.kwargs["embed"].description)
 
 
 if __name__ == "__main__":

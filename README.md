@@ -110,6 +110,10 @@ Các bài ẩn không hiện trong danh sách, đề hoặc luồng nộp của 
 
 Code C++ đặt trong khối code ba dấu backtick. Slash command Discord đồng bộ
 khi bot khởi động; lệnh toàn cục có thể cần thời gian mới hiện trên Discord.
+Trên Discord, `>problems` mở menu chuyên đề → bài → đề giống Telegram. Có
+thể dùng `>problems 1` hoặc `>problems quy` để mở nhanh chuyên đề theo số
+thứ tự hoặc tiền tố; danh sách tự phân trang khi có hơn 25 mục. `>show TÊN`
+và `/bai` hiển thị cùng nội dung, số test, thời gian và phiên bản bài.
 
 ## Thêm bài trên Telegram
 

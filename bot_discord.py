@@ -22,7 +22,7 @@ bot = commands.Bot(command_prefix=">", intents=intents)
 MESSAGE_REPLY_TEMPLATES = {
     "ac": [
         "Chúc mừng! Bạn đã giải đúng bài toán.",
-        "AC rồi! Code mượt như nhung, 10/10 test cases gục ngã! 🎉",
+        "AC rồi! Code mượt như nhung, các test cases đều vượt qua! 🎉",
         "Tuyệt vời! Bài này đã bị bạn chinh phục hoàn toàn!",
         "Full AC! Hôm nay bạn chính là main character! ⭐",
         "Đỉnh quá! Máy chấm cũng phải gật gù công nhận!",
@@ -168,19 +168,57 @@ async def checker(ctx, name: str, *, code: str):
 
 
 @bot.command()
-async def show(ctx, name: str):
-    name = name.strip()
-    p = core.visible_problem(name, "discord", ctx.author.id)
+async def show(ctx, *, name: str):
+    await _deliver_problem(ctx.send, name.strip(), ctx.author.id)
+
+
+def _safe_text(value, limit=100):
+    value = discord.utils.escape_mentions(discord.utils.escape_markdown(value))
+    return value if len(value) <= limit else value[:limit - 1] + "…"
+
+
+def _question_chunks(question, limit=3900):
+    """Split long Markdown without leaving an open code fence in an embed."""
+    chunks, current, fenced = [], "", False
+    for line in question.splitlines(keepends=True):
+        while line:
+            suffix = "\n```" if fenced else ""
+            room = limit - len(current) - len(suffix)
+            opening_only = fenced and current.startswith("```") and current.count("\n") == 1
+            if len(line) > room and current and not opening_only:
+                chunks.append(current + suffix)
+                current = "```\n" if fenced else ""
+                continue
+            part, line = line[:room], line[room:]
+            current += part
+            if not line and part.lstrip().startswith("```"):
+                fenced = not fenced
+            if line:
+                chunks.append(current + ("\n```" if fenced else ""))
+                current = "```\n" if fenced else ""
+    if current:
+        chunks.append(current + ("\n```" if fenced else ""))
+    return chunks or ["*Chưa có nội dung đề bài.*"]
+
+
+async def _deliver_problem(send, name, user_id):
+    """Shared problem display for prefix, slash, and browser selection."""
+    p = core.visible_problem(name, "discord", user_id)
     if p is None:
-        await ctx.send(embed=discord.Embed(
-            description=f"❌ **Lỗi:** Không tìm thấy bài `{name}`.",
+        await send(embed=discord.Embed(
+            description=f"❌ **Lỗi:** Không tìm thấy bài `{_safe_text(name, 120)}`.",
             color=discord.Color.red(),
         ))
         return
-    ques = p["question"] or "*Chưa có nội dung đề bài.*"
-    await ctx.send(embed=discord.Embed(
-        title=f"📝 Đề bài: {name}", description=ques, color=discord.Color.blue(),
-    ), view=SubmitView(name))
+    for index, chunk in enumerate(_question_chunks(p.get("question", "")), 1):
+        embed = discord.Embed(
+            title=f"📝 Đề bài: {_safe_text(name, 220)}" if index == 1 else None,
+            description=chunk, color=discord.Color.blue())
+        if index == 1:
+            embed.set_footer(text=(f"{p.get('test_count', 10)} test · "
+                                   f"{p.get('time_limit', 2)} giây/test · "
+                                   f"v{p.get('version', 1)}"))
+        await send(embed=embed, view=SubmitView(name) if index == 1 else None)
 
 
 async def _safe_edit_discord(status_msg, embed):
@@ -387,24 +425,140 @@ async def run(ctx, *, code: str):
         ))
 
 
+def _match_category(cats, key):
+    names = list(cats)
+    if key.isdecimal() and 1 <= int(key) <= len(names):
+        return names[int(key) - 1], []
+    exact = [name for name in names if name.casefold() == key.casefold()]
+    if exact:
+        return exact[0], []
+    matches = [name for name in names if name.casefold().startswith(key.casefold())]
+    return (matches[0], []) if len(matches) == 1 else (None, matches)
+
+
+class BrowserSelect(discord.ui.Select):
+    def __init__(self, browser, choices, category):
+        self.browser = browser
+        self.choices = choices
+        self.category = category
+        options = [discord.SelectOption(label=name[:100], value=str(index),
+                                        description=(f"{count} bài" if count is not None else None))
+                   for index, (name, count) in enumerate(choices)]
+        super().__init__(placeholder="Chọn chuyên đề" if category is None else "Chọn bài để xem đề",
+                         options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction):
+        name = self.choices[int(self.values[0])][0]
+        await self.browser.choose(interaction, name, self.category)
+
+
+class ProblemBrowserView(discord.ui.View):
+    """Paged category → problem → statement navigation for one Discord user."""
+    PAGE_SIZE = 25
+
+    def __init__(self, owner_id, category=None):
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        self.category = category
+        self.page = 0
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "Dùng `>problems` để mở danh sách của bạn.", ephemeral=True)
+            return False
+        return True
+
+    def render(self):
+        cats = core.list_visible_problems("discord", self.owner_id)
+        if self.category not in cats:
+            self.category = None
+        if self.category is None:
+            items = [(name, len(problems)) for name, problems in cats.items()]
+            title = "📚 Danh sách chuyên đề"
+            hint = "Chọn chuyên đề bên dưới, hoặc dùng `>problems 1` / `>problems quy`."
+        else:
+            items = [(name, None) for name in cats[self.category]]
+            title = f"📚 Chuyên đề: {_safe_text(self.category, 220)}"
+            hint = "Chọn bài bên dưới để xem đề, hoặc dùng `>show tên_bài`."
+        self.page = min(self.page, max(0, (len(items) - 1) // self.PAGE_SIZE))
+        start = self.page * self.PAGE_SIZE
+        shown = items[start:start + self.PAGE_SIZE]
+        lines = [f"{start + i + 1}. **{_safe_text(name, 100)}**" +
+                 (f" ({count} bài)" if count is not None else "")
+                 for i, (name, count) in enumerate(shown)]
+        embed = discord.Embed(title=title,
+                              description="\n".join(lines) + "\n\n" + hint,
+                              color=discord.Color.blue())
+        embed.set_footer(text=f"Trang {self.page + 1}/{max(1, (len(items) + 24) // 25)}")
+        self.clear_items()
+        if shown:
+            self.add_item(BrowserSelect(self, shown, self.category))
+        if self.category is not None:
+            back = discord.ui.Button(label="⬅️ Chuyên đề", style=discord.ButtonStyle.secondary)
+            back.callback = self.back
+            self.add_item(back)
+        if self.page > 0:
+            prev = discord.ui.Button(label="◀ Trước", style=discord.ButtonStyle.secondary)
+            prev.callback = self.previous
+            self.add_item(prev)
+        if start + self.PAGE_SIZE < len(items):
+            next_button = discord.ui.Button(label="Sau ▶", style=discord.ButtonStyle.secondary)
+            next_button.callback = self.next_page
+            self.add_item(next_button)
+        return embed
+
+    async def choose(self, interaction, name, category):
+        cats = core.list_visible_problems("discord", interaction.user.id)
+        if category is None:
+            if name not in cats:
+                await interaction.response.send_message("Danh sách đã thay đổi. Gõ `>problems` lại nhé.", ephemeral=True)
+                return
+            self.category, self.page = name, 0
+            await interaction.response.edit_message(embed=self.render(), view=self)
+            return
+        if name not in cats.get(category, []):
+            await interaction.response.send_message("Bài đã thay đổi. Gõ `>problems` lại nhé.", ephemeral=True)
+            return
+
+        async def send(**kwargs):
+            if interaction.response.is_done():
+                await interaction.followup.send(**kwargs, ephemeral=True)
+            else:
+                await interaction.response.send_message(**kwargs, ephemeral=True)
+        await _deliver_problem(send, name, interaction.user.id)
+
+    async def back(self, interaction):
+        self.category, self.page = None, 0
+        await interaction.response.edit_message(embed=self.render(), view=self)
+
+    async def previous(self, interaction):
+        self.page -= 1
+        await interaction.response.edit_message(embed=self.render(), view=self)
+
+    async def next_page(self, interaction):
+        self.page += 1
+        await interaction.response.edit_message(embed=self.render(), view=self)
+
+
 @bot.command()
-async def problems(ctx):
+async def problems(ctx, *, key: str = None):
     cats = core.list_visible_problems("discord", ctx.author.id)
     if not cats:
         await ctx.send("Hiện tại chưa có bài tập nào.")
         return
-    problem_list = ""
-    for cat, items in cats.items():
-        problem_list += f"### 🔄 Chuyên đề: {cat}\n"
-        for item in items:
-            problem_list += f"- **{item}**\n"
-        problem_list += "\n"
-    if len(problem_list) > 4000:
-        problem_list = problem_list[:4000] + "\n... (Còn nữa)"
-    await ctx.send(embed=discord.Embed(
-        title="📚 Danh sách bài tập", description=problem_list.strip(),
-        color=discord.Color.blue(),
-    ))
+    category = None
+    if key:
+        category, matches = _match_category(cats, key.strip())
+        if category is None:
+            if matches:
+                lines = "\n".join(f"- {_safe_text(name, 100)}" for name in matches[:25])
+                await ctx.send(f"🔍 Có nhiều chuyên đề khớp `{_safe_text(key, 100)}`:\n{lines}\nDùng số thứ tự hoặc tên đầy đủ.")
+            else:
+                await ctx.send(f"❌ Không tìm thấy chuyên đề `{_safe_text(key, 100)}`. Gõ `>problems` để xem danh sách.")
+            return
+    view = ProblemBrowserView(ctx.author.id, category)
+    await ctx.send(embed=view.render(), view=view)
 
 
 @bot.command()
@@ -429,7 +583,7 @@ async def guide(ctx):
         color=discord.Color.green(),
     )
     embed.add_field(name="1. Xem danh sách bài tập",
-                    value="`>problems`\nHiển thị toàn bộ các bài tập hiện hành trên hệ thống.", inline=False)
+                    value="`>problems` chọn chuyên đề → bài → đề. Có thể dùng `>problems 1` hoặc `>problems quy`.", inline=False)
     embed.add_field(name="2. Xem đề bài",
                     value="`>show <tên_bài>`\nVí dụ: `>show bai1`\nHiển thị nội dung đề bài tương ứng.", inline=False)
     embed.add_field(name="3. Nhập dữ liệu đầu vào (Input)",
@@ -437,7 +591,7 @@ async def guide(ctx):
     embed.add_field(name="4. Chạy thử code (Run)",
                     value="`>run <code_của_bạn>`\nChạy code của bạn với input vừa nhập bằng lệnh `>input`.\nNhớ đặt code trong block.", inline=False)
     embed.add_field(name="5. Nộp bài (Submit)",
-                    value="`>submit <tên_bài> <code_của_bạn>`\nVí dụ: `>submit bai1 <code_của_bạn>`\nBot sẽ tự động sinh test, chấm điểm code của bạn (với 10 test case) và báo kết quả chi tiết.\nMẹo: bấm nút 📝 **Nộp bài** dưới mỗi đề để mở khung nhập code cho tiện.", inline=False)
+                    value="`>submit <tên_bài> <code_của_bạn>`\nVí dụ: `>submit bai1 <code_của_bạn>`\nBot chấm theo số test đã cấu hình cho bài. Bấm nút 📝 **Nộp bài** dưới đề để mở khung nhập code.", inline=False)
     await ctx.send(embed=embed)
 
 
@@ -533,14 +687,12 @@ async def leaderboard(ctx):
 
 @bot.tree.command(name="bai", description="Xem đề bài")
 async def slash_problem(interaction: discord.Interaction, name: str):
-    p = core.visible_problem(name.strip(), "discord", interaction.user.id)
-    if not p:
-        await interaction.response.send_message("Không tìm thấy bài.", ephemeral=True)
-        return
-    await interaction.response.send_message(
-        embed=discord.Embed(title=f"📝 {name}",
-                            description=(p.get("question") or "Chưa có đề bài.")[:4000]),
-        view=SubmitView(name))
+    async def send(**kwargs):
+        if interaction.response.is_done():
+            await interaction.followup.send(**kwargs, ephemeral=True)
+        else:
+            await interaction.response.send_message(**kwargs, ephemeral=True)
+    await _deliver_problem(send, name.strip(), interaction.user.id)
 
 
 @slash_problem.autocomplete("name")
