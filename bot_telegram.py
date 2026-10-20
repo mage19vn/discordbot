@@ -295,6 +295,33 @@ def default_question(ques: str) -> str:
     return text
 
 
+def _html_chunks(body: str, limit: int = 3900):
+    """Split rendered question HTML while balancing open tags in every message."""
+    stack, parts, size = [], [], 0
+    tokens = re.finditer(r"<[^>]+>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);|.",
+                         body, flags=re.DOTALL)
+    for match in tokens:
+        token = match.group()
+        start = re.fullmatch(r"<([a-z]+)>", token)
+        end = re.fullmatch(r"</([a-z]+)>", token)
+        if start:
+            after = [*stack, (start.group(1), token)]
+        elif end and stack and stack[-1][0] == end.group(1):
+            after = stack[:-1]
+        else:
+            after = stack
+        closing = "".join(f"</{name}>" for name, _ in reversed(after))
+        if size + len(token) + len(closing) > limit and parts:
+            yield "".join(parts) + "".join(f"</{name}>" for name, _ in reversed(stack))
+            parts = [tag for _, tag in stack]
+            size = sum(map(len, parts))
+        parts.append(token)
+        size += len(token)
+        stack = after
+    if parts:
+        yield "".join(parts) + "".join(f"</{name}>" for name, _ in reversed(stack))
+
+
 TELEGRAPH_API = "https://api.telegra.ph"
 # Tăng số này mỗi khi đổi cách render trang -> các trang cũ tự tạo lại
 TELEGRAPH_RENDER_VERSION = 4
@@ -469,7 +496,7 @@ async def _deliver_problem(send, name: str, user_id=None):
     ques = default_question(p["question"]) if p["question"] else "<i>Chưa có nội dung đề bài.</i>"
     header = (f"📝 <b>Đề bài: {html.escape(name)}</b>\n"
               f"{p.get('test_count', 10)} test · {p.get('time_limit', 2)} giây/test "
-              f"· v{p.get('version', 1)}")
+              f"· {p.get('memory_limit', 128)} MiB · v{p.get('version', 1)}")
     open_tag, close_tag = "<blockquote expandable>", "</blockquote>"
     limit = 4000 - len(open_tag) - len(close_tag)
     body = ques
@@ -493,16 +520,8 @@ async def _deliver_problem(send, name: str, user_id=None):
         return
 
     await send(header, parse_mode=ParseMode.HTML, reply_markup=markup)
-    while len(body) > limit:
-        cut = body.rfind("\n\n", 0, limit)
-        if cut <= 0:
-            cut = body.rfind("\n", 0, limit)
-        if cut <= 0:
-            cut = limit
-        chunk, body = body[:cut], body[cut:].lstrip()
+    for chunk in _html_chunks(body, limit):
         await send(f"{open_tag}{chunk}{close_tag}", parse_mode=ParseMode.HTML)
-    if body.strip():
-        await send(f"{open_tag}{body}{close_tag}", parse_mode=ParseMode.HTML)
 
 
 async def show(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -657,6 +676,9 @@ async def importjson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Gửi file .json trong chat riêng với bot, kèm caption /importjson. "
+        "Mỗi bài có name, statement (title, description, input, output, "
+        "constraints, examples, notes), solution và các giới hạn. "
+        "Có thể dùng question Markdown kiểu cũ thay cho statement. "
         "Bài mới mặc định ở trạng thái ẩn; dùng /publish tên_bài on sau khi kiểm tra.")
 
 

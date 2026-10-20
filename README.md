@@ -131,7 +131,8 @@ kiểm tra xong, gõ `/publish NHANDOI on` để học sinh thấy bài.
 Để thêm bằng JSON, dùng [file mẫu](examples/problem.json) hoặc tạo file UTF-8
 theo cùng cấu trúc. Mỗi file có thể là một object bài như mẫu, mảng tối đa
 20 bài, `{"problems": [...]}`, hoặc bản `data.json` cũ với `{"de": {"TÊN":
-{...}}}`. Các trường `name`, `question`, `solution`, `gen_test`, `checker`,
+{...}}}`. Các trường `name`, `statement` (hoặc `question` kiểu cũ),
+`solution`, `gen_test`, `checker`,
 `category`, `fixed_tests`, `test_count`, `time_limit`, `memory_limit` và
 `published` được hỗ trợ. `name` dùng chữ Latin, số, `_` hoặc `-`, tối đa
 64 ký tự và không có dấu cách để dùng được với `/submit`. `fixed_tests`
@@ -139,6 +140,21 @@ là mảng input dạng chuỗi; mỗi input tối đa 4 KiB. Nếu số test c�
 `test_count`, cần có `gen_test` để sinh phần còn lại. `test_count` từ 1–10,
 `time_limit` từ 1–2 giây và `memory_limit` từ 64–128 MiB. File tối đa
 256 KiB; mỗi đề/code tối đa 64 KiB.
+
+Trong file mẫu, `statement` tách đề thành `title` (tiêu đề), `description`
+(mô tả), `input`, `output`, `constraints` (điều kiện), `examples` (mảng tối đa
+5 ví dụ, mỗi ví dụ có `input`, `output` và `explanation` tùy chọn) và `notes`
+(ghi chú). `title`, `description`, `input` và `output` cần có nội dung; các
+phần khác có thể bỏ qua. Bot tự ghép thành đề Markdown với tiêu đề và dòng
+trống giữa từng phần, rồi hiển thị đầy đủ trên Telegram, Discord và trang
+Telegraph. Giới hạn test, thời gian và RAM lấy từ `test_count`, `time_limit`,
+`memory_limit` và hiển thị riêng phía trên đề. Không đặt đồng thời `statement`
+và `question`. File cũ có `question` Markdown với các mục `**Input**`,
+`**Output**`, `**Ví dụ**` vẫn được nhập nguyên nội dung; cache Telegraph
+`page_url`/`page_hash` cũ được bỏ qua để tạo lại khi xem đề.
+Các bài đã nhập trước bản cập nhật này vẫn giữ nguyên nội dung trong SQLite;
+muốn đổi đề của bài đó, dùng `/question TÊN_BÀI` hoặc nhập bài dưới tên mới.
+`/importjson` không ghi đè bài trùng tên.
 
 Nhắn **riêng** bot file `.json`, đặt caption chính xác là `/importjson`. Bot
 kiểm tra quyền admin và toàn bộ file trước khi nhập vào SQLite. Nếu sai định

@@ -1,9 +1,29 @@
 {
   "name": "NHANDOI",
   "category": "Cơ bản",
-  "question": "Cho số nguyên n. In ra 2*n.\n\nInput: một số nguyên n.\nOutput: 2*n.",
+  "statement": {
+    "title": "Nhân đôi một số",
+    "description": "Cho số nguyên n. Hãy tính giá trị gấp đôi của n.",
+    "input": "Một dòng chứa số nguyên n.",
+    "output": "In ra 2*n trên một dòng.",
+    "constraints": "-10^9 <= n <= 10^9",
+    "examples": [
+      {
+        "input": "3\n",
+        "output": "6\n",
+        "explanation": "Hai lần 3 bằng 6."
+      },
+      {
+        "input": "-5\n",
+        "output": "-10\n"
+      }
+    ],
+    "notes": "Kết quả có thể là số âm."
+  },
   "solution": "#include <iostream>\nint main() { long long n; std::cin >> n; std::cout << 2*n << '\\n'; }",
-  "fixed_tests": ["1\n", "-5\n"],
+  "gen_test": "",
+  "checker": "",
+  "fixed_tests": ["3\n", "-5\n"],
   "test_count": 2,
   "time_limit": 2,
   "memory_limit": 128,

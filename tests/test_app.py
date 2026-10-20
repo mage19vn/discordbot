@@ -29,6 +29,22 @@ class StorageTests(unittest.TestCase):
         parsed = problem_import.parse_problem_json(sample.read_bytes())
         self.assertEqual(parsed[0][0], "NHANDOI")
         self.assertFalse(parsed[0][1]["published"])
+        question = parsed[0][1]["question"]
+        self.assertIn("# **Nhân đôi một số**\n\n", question)
+        self.assertIn("\n\n**Input**\n", question)
+        self.assertIn("\n\n**Output**\n", question)
+        self.assertIn("\n\n**Điều kiện**\n", question)
+        self.assertIn("\n\n**Ví dụ 1**\n\n", question)
+        self.assertIn("\n\n**Ví dụ 2**\n\n", question)
+        self.assertIn("\n\n**Ghi chú**\n", question)
+        rendered = bot_telegram.default_question(question)
+        self.assertIn("<b>Input</b>\n", rendered)
+        self.assertIn("<b>Output</b>\n", rendered)
+        self.assertIn("<pre>3</pre>", rendered)
+        headings = [node["children"][0] for node in bot_telegram.question_to_nodes(question)
+                    if node.get("tag") == "h3"]
+        self.assertTrue(any("Input" in heading for heading in headings))
+        self.assertTrue(any("Output" in heading for heading in headings))
         storage.import_problems(parsed, "telegram", "7")
         self.assertIsNone(core.visible_problem("NHANDOI", "telegram", "8"))
         self.assertEqual(storage.get_problem("NHANDOI")["author"], "7")
@@ -45,6 +61,11 @@ class StorageTests(unittest.TestCase):
             problem_import.parse_problem_json(b'{"name":"bad","test_count":true}')
         with self.assertRaisesRegex(ValueError, "cần đề"):
             problem_import.parse_problem_json(b'{"name":"bad","published":true}')
+        with self.assertRaisesRegex(ValueError, "không dùng cả hai"):
+            problem_import.parse_problem_json(b'{"name":"bad","question":"x","statement":{}}')
+        with self.assertRaisesRegex(ValueError, "input"):
+            problem_import.parse_problem_json(b'{"name":"bad","statement":'
+                                              b'{"title":"T","description":"d","output":"o"}}')
         legacy = {"de": {"legacy_json": {"question": "Q", "solution": "S",
                                           "page_url": "old"}}, "inp_data": {"7": "x"}}
         parsed = problem_import.parse_problem_json(json.dumps(legacy).encode())
@@ -138,6 +159,27 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(preview), 4096)
         self.assertIn("&lt;&amp;&gt;", preview)
         self.assertTrue(preview.endswith("</pre>"))
+
+    async def test_long_question_preserves_html_sections(self):
+        question = "# **Bài dài**\n\n**Input**\n```\n" + "&" * 3000 + "\n```\n\n**Output**\nKết quả"
+        body = bot_telegram.default_question(question)
+        chunks = list(bot_telegram._html_chunks(body, 3900))
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk) <= 3900 for chunk in chunks))
+        self.assertEqual(sum(chunk.count("&amp;") for chunk in chunks), 3000)
+        self.assertTrue(all(chunk.count("<pre>") == chunk.count("</pre>") for chunk in chunks))
+        self.assertIn("<b>Output</b>", "".join(chunks))
+        problem = {"question": question, "test_count": 2,
+                   "time_limit": 1, "memory_limit": 64, "version": 3}
+        send = AsyncMock()
+        with patch.object(core, "visible_problem", return_value=problem), \
+             patch.object(bot_telegram, "_get_telegraph_url", new_callable=AsyncMock,
+                          return_value=None):
+            await bot_telegram._deliver_problem(send, "DEMO", 7)
+        sent = [call.args[0] for call in send.await_args_list]
+        self.assertGreater(len(sent), 2)
+        self.assertTrue(all(len(text) <= 4000 for text in sent))
+        self.assertIn("64 MiB", sent[0])
 
     async def test_config_validation(self):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "present",
@@ -255,6 +297,19 @@ class JudgeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DiscordDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_structured_statement_keeps_sections_separate(self):
+        sample = Path(__file__).resolve().parents[1] / "examples" / "problem.json"
+        name, problem = problem_import.parse_problem_json(sample.read_bytes())[0]
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        with patch.object(core, "visible_problem", return_value=problem):
+            await bot_discord.show.callback(ctx, name=name)
+        description = ctx.send.await_args.kwargs["embed"].description
+        self.assertIn("**Input**\n", description)
+        self.assertIn("\n\n**Output**\n", description)
+        self.assertIn("\n\n**Ví dụ 1**\n\n", description)
+        self.assertIn("\n\n**Ví dụ 2**\n\n", description)
+        self.assertIn("128 MiB", ctx.send.await_args.kwargs["embed"].footer.text)
+
     async def test_show_and_slash_share_complete_statement(self):
         question = "```cpp\n" + "x" * 8000 + "\n```"
         problem = {"question": question, "test_count": 2,

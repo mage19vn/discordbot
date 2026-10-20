@@ -217,6 +217,7 @@ async def _deliver_problem(send, name, user_id):
         if index == 1:
             embed.set_footer(text=(f"{p.get('test_count', 10)} test · "
                                    f"{p.get('time_limit', 2)} giây/test · "
+                                   f"{p.get('memory_limit', 128)} MiB · "
                                    f"v{p.get('version', 1)}"))
         await send(embed=embed, view=SubmitView(name) if index == 1 else None)
 
