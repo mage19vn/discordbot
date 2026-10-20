@@ -1,0 +1,32 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+telegraph_token.txt
+
+# Temporary build & execution files (C++ / temp dirs created by judge)
+temp_*/
+*.exe
+*.o
+*.obj
+*.out
+*.inp
+*.ans
+*.res
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

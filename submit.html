@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Nộp bài MagOJ</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--tg-theme-secondary-bg-color, #efeff3);
+    color: var(--tg-theme-text-color, #111);
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 18px 14px 30px;
+  }
+  .topbar { margin: 2px 2px 14px; }
+  .prob-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--tg-theme-button-color, #2aabee);
+    color: var(--tg-theme-button-text-color, #fff);
+    font-weight: 700; font-size: 15px;
+    padding: 9px 16px; border-radius: 999px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.14);
+  }
+  .hint {
+    margin-top: 10px; font-size: 13px;
+    color: var(--tg-theme-hint-color, #777);
+  }
+  #err {
+    display: none; margin: 0 2px 12px; padding: 11px 14px;
+    background: #fdecea; color: #b3261e;
+    border: 1px solid #f5c6c2; border-radius: 12px; font-size: 13px;
+  }
+  .editor-card {
+    background: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+    border: 1px solid rgba(0,0,0,.07);
+    border-radius: 16px; overflow: hidden;
+    box-shadow: 0 6px 22px rgba(0,0,0,.09);
+  }
+  .editor-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(0,0,0,.07);
+    background: rgba(0,0,0,.03);
+  }
+  .dots { display: inline-flex; gap: 6px; }
+  .dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1) { background: #ff5f57; }
+  .dots i:nth-child(2) { background: #febc2e; }
+  .dots i:nth-child(3) { background: #28c840; }
+  .filename {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px; font-weight: 600; opacity: .85;
+  }
+  .lang {
+    font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    background: var(--tg-theme-button-color, #2aabee);
+    color: var(--tg-theme-button-text-color, #fff);
+    padding: 3px 9px; border-radius: 6px;
+  }
+  #counter {
+    margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums;
+    color: var(--tg-theme-hint-color, #777);
+    background: rgba(0,0,0,.06); padding: 4px 11px; border-radius: 999px;
+  }
+  #counter.warn { background: #fff4e0; color: #8a5a00; }
+  #counter.over { background: #fdecea; color: #b3261e; font-weight: 700; }
+
+  /* Ô nhập thuần: hiện trước khi CodeMirror tải xong, hoặc thay thế nếu CDN lỗi. */
+  #code {
+    display: block; width: 100%;
+    min-height: 44vh; min-height: 44dvh;
+    margin: 0; padding: 12px 14px;
+    border: 0; outline: 0; resize: none;
+    background: transparent; color: inherit;
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .CodeMirror {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px; line-height: 1.6;
+    min-height: 44vh; min-height: 44dvh; padding: 8px 0;
+  }
+  .CodeMirror-placeholder { color: #9aa0a6 !important; }
+  .foot {
+    margin: 16px 4px 0; text-align: center;
+    font-size: 12px; color: var(--tg-theme-hint-color, #888);
+  }
+  .preview-btn {
+    display: block; margin: 18px auto; padding: 13px 34px;
+    border: 0; border-radius: 12px;
+    background: #2aabee; color: #fff; font-size: 16px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="prob-badge">📝 <span id="pname">Nộp bài</span></div>
+    <div class="hint">Dán code C++ vào khung bên dưới rồi bấm nút <b>Nộp bài</b> ở cuối màn hình.<span id="restored" hidden> • Đã khôi phục bản nháp lần trước.</span></div>
+  </div>
+
+  <div id="err" role="alert"></div>
+
+  <div class="editor-card">
+    <div class="editor-head">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="filename">solution.cpp</span>
+      <span class="lang">C++</span>
+      <span id="counter" title="Dung lượng gói gửi đi (byte). Dấu xuống dòng và dấu nháy kép cũng được tính. Tối đa 4096.">0 / 4096</span>
+    </div>
+    <textarea id="code" aria-label="Code C++" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+  </div>
+
+  <div class="foot">Gửi qua Telegram (tối đa ~4KB) • Bot chấm 10 test cases</div>
+
+<script>
+  // Báo cho Telegram biết giao diện đã sẵn sàng ngay khi HTML hiển thị,
+  // không phải chờ CodeMirror tải xong.
+  (function () {
+    var tg = window.Telegram && Telegram.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/display/placeholder.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const MAX_PAYLOAD = 4096; // giới hạn byte của tg.sendData
+  const PLACEHOLDER = "// Dán code C++ của bạn vào đây…";
+  const DARK_CSS = "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css";
+
+  const tg = (window.Telegram && Telegram.WebApp) ? Telegram.WebApp : null;
+  const problem = new URLSearchParams(location.search).get("p") || "";
+  const encoder = new TextEncoder();
+  const DRAFT_KEY = "magoj:draft:" + problem;
+
+  const $ = (id) => document.getElementById(id);
+  const ta = $("code");
+  const counter = $("counter");
+  const err = $("err");
+
+  $("pname").textContent = problem ? "Nộp bài: " + problem : "Nộp bài";
+
+  // ---------- Giao diện sáng / tối ----------
+  const isDark = () => tg
+    ? tg.colorScheme === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+  // Chỉ tải CSS theme tối khi thật sự cần (bớt một request chặn render cho giao diện sáng).
+  function ensureDarkCss() {
+    if (!isDark() || $("cm-dark")) return;
+    const link = document.createElement("link");
+    link.id = "cm-dark";
+    link.rel = "stylesheet";
+    link.href = DARK_CSS;
+    document.head.appendChild(link);
+  }
+
+  function applyTheme() {
+    ensureDarkCss();
+    if (editor) editor.setOption("theme", isDark() ? "material-darker" : "default");
+    if (tg && tg.setHeaderColor) {
+      tg.setHeaderColor(tg.themeParams.bg_color || (isDark() ? "#0e0e0e" : "#ffffff"));
+    }
+  }
+
+  // ---------- Trình soạn thảo (có dự phòng nếu CodeMirror không tải được) ----------
+  ensureDarkCss();
+  const editor = (typeof CodeMirror !== "undefined")
+    ? CodeMirror.fromTextArea(ta, {
+        mode: "text/x-c++src",
+        theme: isDark() ? "material-darker" : "default",
+        lineNumbers: true,
+        matchBrackets: true,
+        indentUnit: 4,
+        viewportMargin: Infinity,
+        placeholder: PLACEHOLDER
+      })
+    : null;
+  if (!editor) ta.placeholder = PLACEHOLDER;
+
+  const getCode = () => editor ? editor.getValue() : ta.value;
+  const setCode = (v) => { if (editor) editor.setValue(v); else ta.value = v; };
+  const onCodeChange = (fn) => editor ? editor.on("change", fn) : ta.addEventListener("input", fn);
+
+  // ---------- Đếm dung lượng: tính đúng gói JSON sẽ gửi ----------
+  const buildPayload = (code) => JSON.stringify({ t: "submit", p: problem, c: code });
+  const byteLength = (s) => encoder.encode(s).length;
+
+  function refreshCounter() {
+    const n = byteLength(buildPayload(getCode()));
+    counter.textContent = n + " / " + MAX_PAYLOAD;
+    counter.classList.toggle("over", n > MAX_PAYLOAD);
+    counter.classList.toggle("warn", n > MAX_PAYLOAD * 0.9 && n <= MAX_PAYLOAD);
+  }
+
+  // ---------- Lưu nháp theo từng bài (tránh mất code khi lỡ đóng app) ----------
+  let saveTimer = 0;
+  function saveDraft() {
+    clearTimeout(saveTimer);
+    if (!problem) return;
+    try {
+      const code = getCode();
+      if (code) localStorage.setItem(DRAFT_KEY, code);
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch (_) { /* localStorage có thể bị chặn */ }
+  }
+
+  if (problem) {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        setCode(draft);
+        $("restored").hidden = false;
+      }
+    } catch (_) {}
+  }
+
+  onCodeChange(function () {
+    refreshCounter();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 400);
+  });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) saveDraft(); });
+  window.addEventListener("pagehide", saveDraft);
+  refreshCounter();
+
+  // ---------- Nộp bài ----------
+  const showErr = (m) => { err.style.display = "block"; err.textContent = m; };
+  const hideErr = () => { err.style.display = "none"; };
+
+  let sent = false;
+  let btn = null;
+
+  function submit() {
+    if (sent) return; // chặn bấm nhiều lần
+    hideErr();
+
+    const code = getCode();
+    if (!code.trim()) { showErr("Chưa có code — dán code vào khung đã nhé."); return; }
+    if (!problem) { showErr("Thiếu tên bài — mở lại từ nút Nộp bài dưới đề nhé."); return; }
+
+    const data = buildPayload(code);
+    const size = byteLength(data);
+    if (size > MAX_PAYLOAD) {
+      showErr("Code quá dài: gói gửi đi " + size + "/" + MAX_PAYLOAD + " byte (xuống dòng và dấu nháy cũng được tính). Hãy rút gọn hoặc nộp bằng /submit.");
+      return;
+    }
+
+    sent = true;
+    saveDraft(); // giữ lại bản vừa nộp để sửa và nộp lại cho tiện
+    if (btn && btn.showProgress) btn.showProgress();
+    try {
+      tg.sendData(data); // Telegram tự đóng Mini App sau khi gửi
+    } catch (e) {
+      sent = false;
+      if (btn && btn.hideProgress) btn.hideProgress();
+      showErr("Không gửi được: " + (e && e.message ? e.message : e));
+      return;
+    }
+    setTimeout(function () { tg.close(); }, 300); // phòng hờ nếu client không tự đóng
+  }
+
+  // ---------- Khởi tạo Telegram ----------
+  if (tg) {
+    if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    applyTheme();
+    tg.onEvent("themeChanged", applyTheme);
+    btn = tg.MainButton || tg.BottomButton;
+    btn.setText("Nộp bài").show().onClick(submit);
+  } else {
+    // Chế độ xem thử ngoài Telegram
+    const b = document.createElement("button");
+    b.className = "preview-btn";
+    b.textContent = "Nộp bài (chế độ xem thử)";
+    b.onclick = function () { alert("Mở trang này từ nút Nộp bài trong Telegram mới gửi được nhé."); };
+    document.body.appendChild(b);
+  }
+})();
+</script>
+</body>
+</html>
