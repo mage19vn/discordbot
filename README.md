@@ -4,6 +4,42 @@ Bot dùng một lõi chấm C++ cho Discord, Telegram và Zalo. Mỗi bài có �
 generator và checker tùy chọn. Mỗi bài có thể cấu hình 1–10 test. Telegram có Web App
 trong `submit.html`; Discord có nút nộp bài và một số slash command.
 
+## Gửi ảnh Markdown trên Zalo
+
+Gửi `/photo # Xin chào` (có thể xuống dòng, dùng bảng, chữ đậm, khối code).
+Luồng dùng chung trong `core.py`: `markdown_to_html` → `markdown_to_png` →
+`save_png` → `send_markdown_photo`, gọi SDK `send_photo` / API `sendPhoto`.
+Ảnh lưu cố định, tên riêng cho mỗi lần tạo, trong `generated_photos/`.
+
+```python
+import core
+
+# Chỉ tạo và lưu PNG, chưa gửi đi:
+png = await core.markdown_to_png("# Xin chào\n\n**Tiếng Việt**")
+path = await core.save_png(png)
+
+# Tạo, lưu và gửi ảnh cho một chat bằng đối tượng zalo_bot.Bot đang kết nối:
+message = await core.send_markdown_photo(bot, chat_id, "# Kết quả", caption="Kết quả")
+```
+
+Cài `requirements.txt`, rồi chạy `python -m playwright install chromium --only-shell`.
+Ảnh hỗ trợ Markdown thông thường và bảng; chưa render công thức LaTeX.
+HTML thô được escape, ảnh ngoài và truy cập mạng trong trang bị chặn.
+Nội dung tối đa 64 KiB, ảnh tối đa cao 12.000 px; nội dung dài hơn cần chia nhỏ.
+
+Theo [API sendPhoto của Zalo](https://bot.zapps.me/docs/apis/sendPhoto/), tham số
+`photo` là đường dẫn ảnh. Để Zalo tải được PNG, cần web server riêng phục vụ thư mục ảnh
+và đặt `MAGOJ_PHOTO_BASE_URL=https://your-domain.example/images`,
+`MAGOJ_PHOTO_DIR=generated_photos` (hoặc đường dẫn tuyệt đối đến thư mục static).
+Chỉ đặt biến URL không tự tạo web server hay upload file.
+Nếu chưa có URL, `/photo` vẫn tạo/lưu PNG và báo chưa thể gửi.
+File được giữ lại khi API lỗi; quản trị viên chủ động xóa ảnh cũ khi không cần nữa.
+Không dùng thư mục ảnh làm thư mục chứa token hoặc database.
+
+Có thể truyền `publish=upload_png` vào `send_markdown_photo`; `upload_png` là hàm
+async nhận `bytes` PNG, lưu/upload theo cách của bạn và trả URL HTTPS công khai.
+Khi dùng callback này, callback chịu trách nhiệm lưu file và thời gian giữ ảnh.
+
 ## Cài trên KataBump
 
 Xem [hướng dẫn KataBump và sửa lỗi thiếu dotenv](KATABUMP.md). Chạy

@@ -1,5 +1,26 @@
 # Chạy MagOJ trên KataBump
 
+## Tạo và gửi ảnh Zalo
+
+Sau khi cài `requirements.txt`, chạy bằng Python của server:
+
+```sh
+python -m playwright install chromium --only-shell
+```
+
+Chromium cần thư viện hệ thống Linux và RAM để chụp HTML. Nếu image hosting thiếu
+thư viện, cần nhà cung cấp bổ sung/chọn image có Chromium; `pip install` không
+tự cài các thư viện hệ thống này. Không chạy `--with-deps` nếu hosting không cấp root.
+Các bot/lệnh văn bản vẫn khởi động khi chưa có Chromium; chỉ tác vụ tạo ảnh báo lỗi.
+
+`/photo <Markdown>` tạo PNG và lưu trong `generated_photos/` cạnh `main.py`.
+Để gửi ảnh, cấu hình `MAGOJ_PHOTO_DIR` và `MAGOJ_PHOTO_BASE_URL` trỏ tới cùng
+một thư mục được web server phục vụ qua HTTPS công khai. KataBump Files/SFTP
+không tự biến đường dẫn `/home/container/generated_photos/` thành URL ảnh.
+Chưa có URL thì ảnh vẫn được lưu, bot báo chưa gửi được. Khi cập nhật code,
+giữ nguyên thư mục ảnh; chủ động dọn ảnh cũ theo nhu cầu.
+Xem [hàm dùng chung và ví dụ](README.md#gửi-ảnh-markdown-trên-zalo).
+
 ## Sửa ngay lỗi `No module named 'dotenv'`
 
 Tên thư viện cài đặt là `python-dotenv`, tên import là `dotenv`. Đừng cài gói

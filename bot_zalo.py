@@ -46,7 +46,7 @@ ADMIN_HELP = ("Lệnh quản trị (cần ZALO_ADMIN_IDS):\n"
 FIELD_COMMANDS = {"question": "question", "solution": "solution",
                   "gen": "gen_test", "checker": "checker"}
 ADMIN_COMMANDS = {"create", "category", "admin_guide", "how", *FIELD_COMMANDS}
-BUILTIN_COMMANDS = {"start", "help", "guide", "id", "problems", "show", "input",
+BUILTIN_COMMANDS = {"start", "help", "guide", "id", "problems", "show", "input", "photo",
                     "run", "submit", "done", "cancel", "games", *ADMIN_COMMANDS}
 
 
@@ -177,13 +177,17 @@ class ZaloAdapter:
         games = "\n".join(f"• {entry.title} → /help {game[5:]}" for game, entry in grouped.items())
         return card("🎮 Hôm nay chơi gì?" if topic == "games" else "👋 Chào bạn, mình là MagOJ",
                     ("Chọn trò chơi:\n" + (games or "Chưa có game được nạp.")) if topic == "games" else
-                    "🎮 Giải trí → /games\n📚 Học & nộp C++ → /help cpp\n\n" + games,
+                    "🎮 Giải trí → /games\n📚 Học & nộp C++ → /help cpp\n🖼 /photo <Markdown> → tạo ảnh\n\n" + games,
                     "/id • ID tài khoản\n/admin_guide • Quản trị" if topic != "games" else
                     "Gửi lệnh trên một dòng. Trong nhóm, hãy mention hoặc reply bot.")
 
     async def send(self, chat_id: str, text: str) -> None:
         for chunk in split_message(text or " "):
             await self.bot.send_message(chat_id=str(chat_id), text=chunk)
+
+    async def send_photo(self, chat_id: str, markdown: str, **kwargs):
+        """Reusable image reply for Zalo commands and future tasks."""
+        return await core.send_markdown_photo(self.bot, chat_id, markdown, **kwargs)
 
     def _prune(self, now: float) -> None:
         self.sessions = {key: value for key, value in self.sessions.items()
@@ -267,6 +271,17 @@ class ZaloAdapter:
             await self.send(chat_id, self.help_text(args))
         elif command == "games":
             await self.send(chat_id, self.help_text("games"))
+        elif command == "photo":
+            if not args.strip():
+                await self.send(chat_id, "Dùng /photo <Markdown> để gửi nội dung thành ảnh PNG.")
+                return
+            try:
+                await self.send_photo(chat_id, args)
+            except (ValueError, core.PhotoRenderError) as exc:
+                await self.send(chat_id, str(exc))
+            except (OSError, ZaloError):
+                LOG.warning("Zalo: không lưu hoặc gửi được ảnh PNG")
+                await self.send(chat_id, "Chưa gửi được ảnh. Vui lòng thử lại sau.")
         elif command == "id":
             await self.send(chat_id, f"Zalo user ID của bạn: {user_id}")
         elif command == "admin_guide":

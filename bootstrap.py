@@ -11,7 +11,8 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent
 MODULES = {"discord.py": "discord", "python-telegram-bot": "telegram",
-           "python-dotenv": "dotenv", "python-zalo-bot": "zalo_bot"}
+           "python-dotenv": "dotenv", "python-zalo-bot": "zalo_bot",
+           "markdown-it-py": "markdown_it", "playwright": "playwright"}
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 
