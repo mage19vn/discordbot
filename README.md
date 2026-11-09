@@ -27,14 +27,43 @@ Cài `requirements.txt`, rồi chạy `python -m playwright install chromium --o
 HTML thô được escape, ảnh ngoài và truy cập mạng trong trang bị chặn.
 Nội dung tối đa 64 KiB, ảnh tối đa cao 12.000 px; nội dung dài hơn cần chia nhỏ.
 
-Theo [API sendPhoto của Zalo](https://bot.zapps.me/docs/apis/sendPhoto/), tham số
-`photo` là đường dẫn ảnh. Để Zalo tải được PNG, cần web server riêng phục vụ thư mục ảnh
-và đặt `MAGOJ_PHOTO_BASE_URL=https://your-domain.example/images`,
-`MAGOJ_PHOTO_DIR=generated_photos` (hoặc đường dẫn tuyệt đối đến thư mục static).
-Chỉ đặt biến URL không tự tạo web server hay upload file.
-Nếu chưa có URL, `/photo` vẫn tạo/lưu PNG và báo chưa thể gửi.
-File được giữ lại khi API lỗi; quản trị viên chủ động xóa ảnh cũ khi không cần nữa.
-Không dùng thư mục ảnh làm thư mục chứa token hoặc database.
+### Cloudinary trên KataBump
+
+Bot lưu PNG tại máy → upload Cloudinary → lấy `secure_url` → gửi Zalo.
+Không cần mở port, chạy web server hoặc cấu hình `MAGOJ_PHOTO_BASE_URL`.
+
+1. Tạo tài khoản tại [Cloudinary](https://cloudinary.com/users/register_free).
+2. Trong Cloudinary Console, vào Settings → API Keys, lấy Cloud name, API Key,
+   API Secret của product environment muốn dùng.
+3. Điền các giá trị vào `.env` trên KataBump (giữ nguyên token bot đang có):
+
+```dotenv
+MAGOJ_PHOTO_PROVIDER=cloudinary
+MAGOJ_PHOTO_DIR=generated_photos
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+CLOUDINARY_FOLDER=magoj
+```
+
+4. Cài `python -m pip install -r requirements.txt` và
+   `python -m playwright install chromium --only-shell`, rồi Restart bot.
+5. Gửi `/photo # Xin chào`. Kiểm tra PNG trong `generated_photos/` và ảnh đã upload
+   trong Cloudinary Media Library. Bot dùng URL ảnh trả về, không tự ghép URL CDN.
+
+API Secret chỉ đặt trong `.env`/biến môi trường server, không ghi vào code hay commit.
+Upload được ký bằng SDK chính thức, không cần unsigned upload preset.
+Ảnh được upload ở dạng công khai để Zalo tải được. Xem
+[tài liệu upload Cloudinary](https://cloudinary.com/documentation/django_image_and_video_upload).
+Bot không tự xóa ảnh local hay Cloudinary; quản trị viên chủ động dọn ảnh khi không cần.
+Nếu thiếu khóa hoặc upload lỗi, PNG local vẫn được giữ lại và bot báo lỗi.
+
+Nếu không đặt `MAGOJ_PHOTO_PROVIDER`, có bất kỳ khóa `CLOUDINARY_CLOUD_NAME`,
+`CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` nào thì bot chọn Cloudinary;
+nếu không có khóa thì dùng chế độ local cũ. Có thể chọn rõ
+`MAGOJ_PHOTO_PROVIDER=local`, cấu hình web server HTTPS phục vụ thư mục ảnh và đặt
+`MAGOJ_PHOTO_BASE_URL=https://your-domain.example/images`. Chỉ đặt biến URL không tự
+tạo web server. Không dùng thư mục ảnh làm thư mục chứa token hoặc database.
 
 Có thể truyền `publish=upload_png` vào `send_markdown_photo`; `upload_png` là hàm
 async nhận `bytes` PNG, lưu/upload theo cách của bạn và trả URL HTTPS công khai.

@@ -1,6 +1,7 @@
 """Markdown image rendering, persistent files and the Zalo sendPhoto contract."""
 
 import os
+import json
 from pathlib import Path
 import struct
 import tempfile
@@ -41,6 +42,11 @@ class PhotoTests(unittest.IsolatedAsyncioTestCase):
         self.env = patch.dict(os.environ, {
             'MAGOJ_PHOTO_DIR': self.folder.name,
             'MAGOJ_PHOTO_BASE_URL': 'https://images.example.org/bot/',
+            'MAGOJ_PHOTO_PROVIDER': 'local',
+            'CLOUDINARY_CLOUD_NAME': 'test-cloud',
+            'CLOUDINARY_API_KEY': 'test-key',
+            'CLOUDINARY_API_SECRET': 'test-secret',
+            'CLOUDINARY_FOLDER': 'magoj',
         })
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -69,6 +75,63 @@ class PhotoTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(core.PhotoRenderError, 'Đã lưu PNG'):
                 await core.send_markdown_photo(self.bot, 'chat', '# Local')
         self.assertEqual(len(list(Path(self.folder.name).glob('*.png'))), 1)
+        self.api.assert_not_awaited()
+
+    async def test_cloudinary_sdk_uploads_signed_file_and_sends_returned_https_url(self):
+        url = 'https://res.cloudinary.com/test-cloud/image/upload/v1/magoj/photo.png'
+        response = SimpleNamespace(status=200, headers={}, data=json.dumps({'secure_url': url}).encode())
+        with patch.dict(os.environ, {'MAGOJ_PHOTO_PROVIDER': 'cloudinary', 'MAGOJ_PHOTO_BASE_URL': ''}), \
+             patch.object(core, 'markdown_to_png', AsyncMock(return_value=b'png')), \
+             patch('cloudinary.uploader._http.request', return_value=response) as http:
+            await core.send_markdown_photo(self.bot, 'chat', '# Hello')
+        self.assertEqual(self.api.await_args.args[0], 'sendPhoto')
+        self.assertEqual(self.api.await_args.args[1]['photo'], url)
+        self.assertIn('/test-cloud/image/upload', http.call_args.kwargs['url'])
+        fields = dict(http.call_args.kwargs['fields'])
+        self.assertEqual(fields['api_key'], 'test-key')
+        self.assertTrue(fields['signature'])
+        self.assertNotIn('api_secret', fields)
+        self.assertEqual(fields['type'], 'upload')
+        self.assertEqual(fields['overwrite'], '0')
+        self.assertTrue(fields['public_id'].startswith('magoj/'))
+        self.assertEqual(fields['file'][1], b'png')
+        self.assertEqual(len(list(Path(self.folder.name).glob('*.png'))), 1)
+
+    async def test_credentials_auto_select_cloudinary(self):
+        with patch.dict(os.environ, {'MAGOJ_PHOTO_PROVIDER': ''}), \
+             patch.object(core, 'upload_png_cloudinary', AsyncMock(return_value='https://cdn.example.org/image.png')) as upload:
+            url = await core.publish_png(b'png')
+        upload.assert_awaited_once()
+        self.assertTrue(upload.await_args.args[0].is_file())
+        self.assertEqual(url, 'https://cdn.example.org/image.png')
+
+    async def test_cloudinary_missing_secret_retains_file_and_does_not_upload(self):
+        with patch.dict(os.environ, {'MAGOJ_PHOTO_PROVIDER': 'cloudinary', 'CLOUDINARY_API_SECRET': ''}), \
+             patch.object(core, 'markdown_to_png', AsyncMock(return_value=b'png')), \
+             patch('cloudinary.uploader.upload') as upload:
+            with self.assertRaisesRegex(core.PhotoRenderError, 'CLOUDINARY_API_SECRET'):
+                await core.send_markdown_photo(self.bot, 'chat', '# Hello')
+        upload.assert_not_called()
+        self.api.assert_not_awaited()
+        self.assertEqual(len(list(Path(self.folder.name).glob('*.png'))), 1)
+
+    async def test_cloudinary_failure_keeps_file_and_redacts_error_details(self):
+        with patch.dict(os.environ, {'MAGOJ_PHOTO_PROVIDER': 'cloudinary'}), \
+             patch.object(core, 'markdown_to_png', AsyncMock(return_value=b'png')), \
+             patch('cloudinary.uploader.upload', side_effect=TimeoutError('test-secret')):
+            with self.assertRaises(core.PhotoRenderError) as raised:
+                await core.send_markdown_photo(self.bot, 'chat', '# Hello')
+        self.assertNotIn('test-secret', str(raised.exception))
+        self.assertTrue(raised.exception.__suppress_context__)
+        self.api.assert_not_awaited()
+        self.assertEqual(len(list(Path(self.folder.name).glob('*.png'))), 1)
+
+    async def test_cloudinary_invalid_response_does_not_send_local_path(self):
+        with patch.dict(os.environ, {'MAGOJ_PHOTO_PROVIDER': 'cloudinary'}), \
+             patch.object(core, 'markdown_to_png', AsyncMock(return_value=b'png')), \
+             patch('cloudinary.uploader.upload', return_value={'secure_url': '/private/image.png'}):
+            with self.assertRaises(core.PhotoRenderError):
+                await core.send_markdown_photo(self.bot, 'chat', '# Hello')
         self.api.assert_not_awaited()
 
     async def test_repeated_saves_keep_distinct_files_and_leave_no_temporary_files(self):

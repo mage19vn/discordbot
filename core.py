@@ -127,13 +127,47 @@ async def save_png(png: bytes) -> Path:
     return directory / name
 
 
-async def publish_png(png: bytes) -> str:
-    """Save locally, then return its URL on the configured external web server.
+async def upload_png_cloudinary(path: Path) -> str:
+    """Upload a saved PNG with signed server-side credentials; return its HTTPS URL."""
+    names = ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET")
+    values = [os.getenv(name, "").strip() for name in names]
+    missing = [name for name, value in zip(names, values) if not value]
+    if missing:
+        raise PhotoRenderError("Thiếu cấu hình Cloudinary: " + ", ".join(missing) +
+                               ". PNG đã được giữ trong thư mục ảnh.")
+    try:
+        from cloudinary.uploader import upload
+    except ImportError:
+        raise PhotoRenderError("Thiếu cloudinary; cài requirements.txt. PNG đã được lưu.") from None
+    folder = (os.getenv("CLOUDINARY_FOLDER") or "magoj").strip("/") or "magoj"
+    try:
+        result = await asyncio.to_thread(
+            upload, str(path), cloud_name=values[0], api_key=values[1], api_secret=values[2],
+            resource_type="image", type="upload", public_id=f"{folder}/{path.stem}",
+            overwrite=False, timeout=30,
+        )
+        return _photo_base_url(result["secure_url"])
+    except Exception:
+        # SDK/network error details may contain credentials. Keep them out of chat/logs.
+        raise PhotoRenderError("Không upload được ảnh lên Cloudinary. Kiểm tra API keys, "
+                               "kết nối và hạn mức tài khoản. PNG vẫn được giữ trên máy.") from None
 
-    Files are retained even if the URL is missing or sending fails. Configure a
-    web server/CDN to map MAGOJ_PHOTO_DIR to MAGOJ_PHOTO_BASE_URL separately.
+
+async def publish_png(png: bytes) -> str:
+    """Save locally, then upload to Cloudinary or use an existing static server.
+
+    Files are retained when credentials, uploading or sending fail. With no
+    explicit provider, Cloudinary credentials select Cloudinary; otherwise local.
     """
     path = await save_png(png)
+    cloudinary_configured = any(os.getenv(name, "").strip() for name in
+                                ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"))
+    provider = (os.getenv("MAGOJ_PHOTO_PROVIDER") or
+                ("cloudinary" if cloudinary_configured else "local")).strip().lower()
+    if provider == "cloudinary":
+        return await upload_png_cloudinary(path)
+    if provider != "local":
+        raise PhotoRenderError("MAGOJ_PHOTO_PROVIDER phải là cloudinary hoặc local. PNG đã được lưu.")
     try:
         base = _photo_base_url(os.getenv("MAGOJ_PHOTO_BASE_URL", ""))
     except PhotoRenderError as exc:

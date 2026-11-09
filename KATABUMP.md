@@ -13,13 +13,24 @@ thư viện, cần nhà cung cấp bổ sung/chọn image có Chromium; `pip ins
 tự cài các thư viện hệ thống này. Không chạy `--with-deps` nếu hosting không cấp root.
 Các bot/lệnh văn bản vẫn khởi động khi chưa có Chromium; chỉ tác vụ tạo ảnh báo lỗi.
 
-`/photo <Markdown>` tạo PNG và lưu trong `generated_photos/` cạnh `main.py`.
-Để gửi ảnh, cấu hình `MAGOJ_PHOTO_DIR` và `MAGOJ_PHOTO_BASE_URL` trỏ tới cùng
-một thư mục được web server phục vụ qua HTTPS công khai. KataBump Files/SFTP
-không tự biến đường dẫn `/home/container/generated_photos/` thành URL ảnh.
-Chưa có URL thì ảnh vẫn được lưu, bot báo chưa gửi được. Khi cập nhật code,
-giữ nguyên thư mục ảnh; chủ động dọn ảnh cũ theo nhu cầu.
-Xem [hàm dùng chung và ví dụ](README.md#gửi-ảnh-markdown-trên-zalo).
+`/photo <Markdown>` tạo PNG và lưu trong `generated_photos/` cạnh `main.py`,
+sau đó upload lên Cloudinary để gửi Zalo. Trong `.env`, thêm:
+
+```dotenv
+MAGOJ_PHOTO_PROVIDER=cloudinary
+MAGOJ_PHOTO_DIR=generated_photos
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+CLOUDINARY_FOLDER=magoj
+```
+
+Lấy ba giá trị Cloudinary từ Console → Settings → API Keys; giữ chúng trong `.env`
+trên server. Cài lại `requirements.txt`, Restart và gửi `/photo # Xin chào`.
+Không cần `MAGOJ_PHOTO_BASE_URL`, web server hay Cloudflare Tunnel trong chế độ này.
+Nếu upload lỗi, PNG vẫn được giữ lại. Khi cập nhật code, giữ nguyên thư mục ảnh
+và `.env`; chủ động dọn ảnh local/Cloudinary khi không cần nữa.
+Xem [cấu hình Cloudinary chi tiết](README.md#cloudinary-trên-katabump).
 
 ## Sửa ngay lỗi `No module named 'dotenv'`
 
