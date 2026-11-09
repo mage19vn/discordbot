@@ -19,6 +19,7 @@ data.sqlite3*
 telegraph_token.txt
 
 # Temporary build & execution files (C++ / temp dirs created by judge)
+dist/
 temp_*/
 *.exe
 *.o

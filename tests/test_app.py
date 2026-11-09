@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -141,6 +142,7 @@ class StorageTests(unittest.TestCase):
                     db.execute("CREATE TABLE submissions (id INTEGER PRIMARY KEY, "
                                "platform TEXT, user_id TEXT, problem TEXT, "
                                "result TEXT, seed INTEGER, created_at TEXT)")
+                db.close()
                 storage.initialize()
                 storage.record_submission("telegram", "1", "A", "wa", 5,
                                           {"inp": "3", "sol": "6"})
@@ -285,6 +287,8 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Đã cập nhật", message.reply_text.await_args.args[0])
 
 
+@unittest.skipUnless(os.name == "posix" and shutil.which("g++"),
+                     "C++ integration requires Linux/POSIX and g++")
 class JudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_compile_run_and_judge(self):
         self.assertEqual((await core.run_once(core.SAMPLE_SOLUTION, "21"))["output"].strip(), "42")

@@ -1,0 +1,18 @@
+{
+  "title": "Đoán số",
+  "help": "Bot chọn số từ 1 đến 10. /doanso để mở lượt → /doso 5 để đoán. Mỗi lượt có 5 lần đoán; bot gợi ý lớn hơn hoặc nhỏ hơn. Cả chat cùng đoán. Chỉ người mở lượt được dùng /boquadoanso để dừng. Lượt hết hạn sau 15 phút không có lần đoán hợp lệ.",
+  "commands": {
+    "doanso": {
+      "description": "bắt đầu trò đoán số từ 1 đến 10",
+      "handler": "game.py:start"
+    },
+    "doso": {
+      "description": "đoán số: /doso <số>",
+      "handler": "game.py:guess"
+    },
+    "boquadoanso": {
+      "description": "kết thúc lượt đoán số",
+      "handler": "game.py:stop"
+    }
+  }
+}

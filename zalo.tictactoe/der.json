@@ -1,0 +1,46 @@
+{
+  "title": "Tic Tac Toe",
+  "help": "Nối 3 quân để thắng. /batdau → /thamgia (hai người) hoặc /choibot kho → /chono 5. X đi trước. Xem luật và sơ đồ ô: /carohelp. Ván bỏ dở hết hạn sau 15 phút; kết quả lưu vào bảng điểm của chat.",
+  "commands": {
+    "batdau": {
+      "description": "tạo ván Tic Tac Toe 3×3 và cầm X",
+      "handler": "game.py:start"
+    },
+    "thamgia": {
+      "description": "vào phòng chờ và cầm O",
+      "handler": "game.py:join"
+    },
+    "chono": {
+      "description": "đánh vào ô: /chono <1-9>",
+      "handler": "game.py:make_move"
+    },
+    "choibot": {
+      "description": "chọn mức bot: /choibot de|vua|kho (mặc định kho)",
+      "handler": "game.py:start_game"
+    },
+    "dungcaro": {
+      "description": "chủ ván đóng phòng chờ hoặc ván đã kết thúc",
+      "handler": "game.py:stop"
+    },
+    "carohelp": {
+      "description": "luật chơi, sơ đồ ô và các mức bot",
+      "handler": "game.py:help_game"
+    },
+    "banco": {
+      "description": "xem bàn cờ và lượt hiện tại",
+      "handler": "game.py:show_board"
+    },
+    "dauhang": {
+      "description": "nhận thua ván đang chơi",
+      "handler": "game.py:surrender"
+    },
+    "choilai": {
+      "description": "yêu cầu hoặc đồng ý tái đấu",
+      "handler": "game.py:rematch"
+    },
+    "diemcaro": {
+      "description": "bảng điểm Tic Tac Toe trong chat",
+      "handler": "game.py:scoreboard"
+    }
+  }
+}

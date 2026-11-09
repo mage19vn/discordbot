@@ -8,6 +8,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+from paths import PROJECT_ROOT
 
 IMAGE = os.getenv("MAGOJ_JUDGE_IMAGE", "gcc@sha256:6f37e44a9b41181de5dd97366ec732652f5d895a72b5549c64694efed50a97e8")
 BACKEND = (os.getenv("MAGOJ_JUDGE_BACKEND") or "local").lower()
@@ -20,10 +21,12 @@ class SandboxUnavailable(RuntimeError):
 def _local(workdir, args, *, input_text=None, timeout=30, memory=256, seed=None,
            output_limit=131072):
     """Limit resource exhaustion. This does not isolate filesystem or network."""
-    env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8"}
+    if os.name == "nt":
+        raise SandboxUnavailable("Local runner requires POSIX resource limits")
+    env = {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8"}
     if seed is not None:
         env["MAGOJ_SEED"] = str(seed)
-    cmd = [sys.executable, str(Path(__file__).with_name("limit_exec.py")),
+    cmd = [sys.executable, str(PROJECT_ROOT / "limit_exec.py"),
            str(timeout), str(memory * 1024 * 1024), str(output_limit), *args]
     try:
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
@@ -90,9 +93,10 @@ def run_compiler(src, exe, timeout):
                        timeout=timeout, memory="512m")
     if BACKEND != "local":
         raise SandboxUnavailable(f"Unknown backend: {BACKEND}")
-    if not shutil.which("g++"):
-        raise SandboxUnavailable("g++ is missing")
-    return _local(source.parent, ["g++", source.name, "-O2", "-o", Path(exe).name],
+    compiler = shutil.which("g++")
+    if not compiler:
+        raise FileNotFoundError("g++ is missing")
+    return _local(source.parent, [compiler, source.name, "-O2", "-o", Path(exe).name],
                   timeout=timeout, memory=256, output_limit=32 * 1024 * 1024)
 
 

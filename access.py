@@ -19,7 +19,8 @@ def telegram_admin(user):
 
 
 def admin_id(platform, user_id):
-    name = {"telegram": "TELEGRAM_ADMIN_IDS", "discord": "DISCORD_ADMIN_IDS"}.get(platform)
+    name = {"telegram": "TELEGRAM_ADMIN_IDS", "discord": "DISCORD_ADMIN_IDS",
+            "zalo": "ZALO_ADMIN_IDS"}.get(platform)
     return bool(name and str(user_id) in _ids(name))
 
 

@@ -4,19 +4,27 @@ import json
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from paths import project_path
 
-DB_PATH = Path(os.getenv("MAGOJ_DB_PATH") or "data.sqlite3")
-LEGACY_PATH = Path(os.getenv("MAGOJ_LEGACY_PATH") or "data.json")
+DB_PATH = project_path(os.getenv("MAGOJ_DB_PATH") or "data.sqlite3")
+_default_legacy = "data.json" if project_path("data.json").exists() else "examples/seed-data.json"
+LEGACY_PATH = project_path(os.getenv("MAGOJ_LEGACY_PATH") or _default_legacy)
 _lock = threading.RLock()
 
 
+@contextmanager
 def _connect():
     db = sqlite3.connect(DB_PATH, timeout=30)
-    db.execute("PRAGMA busy_timeout=30000")
-    db.execute("PRAGMA journal_mode=WAL")
-    return db
+    try:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("PRAGMA journal_mode=WAL")
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
 def initialize():

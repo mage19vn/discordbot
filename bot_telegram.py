@@ -21,8 +21,9 @@ import core
 import access
 import problem_import
 import storage
+from paths import PROJECT_ROOT
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 NOTIFY_CHAT_ID = os.getenv("TELEGRAM_NOTIFY_CHAT_ID")
 WEBAPP_URL = os.getenv("MAGOJ_WEBAPP_URL", "").rstrip("/")  # vd: https://magoj-submit.vercel.app

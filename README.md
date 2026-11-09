@@ -1,22 +1,28 @@
-# MagOJ — bot chấm bài Discord và Telegram
+# MagOJ — bot chấm bài Discord, Telegram và Zalo
 
-Bot dùng một lõi chấm C++ cho cả Discord và Telegram. Mỗi bài có đề, solution,
+Bot dùng một lõi chấm C++ cho Discord, Telegram và Zalo. Mỗi bài có đề, solution,
 generator và checker tùy chọn. Mỗi bài có thể cấu hình 1–10 test. Telegram có Web App
 trong `submit.html`; Discord có nút nộp bài và một số slash command.
 
 ## Cài trên KataBump
 
-Cần chọn server Python và phiên bản Python 3.10+ trên panel. Theo cấu hình
-server hiện tại, `g++` đã có sẵn; không cần Docker, quyền root, `systemd`
-hay `prlimit`. Upload các file dự án vào `/home/container`, sao cho
+Xem [hướng dẫn KataBump và sửa lỗi thiếu dotenv](KATABUMP.md). Chạy
+`python build_katabump.py` để tạo ZIP upload trong `dist/`, gồm đủ các bot và game
+nhưng không chứa token hoặc database đang dùng.
+
+Chọn server Python và Python 3.12 trên panel (tối thiểu 3.10). Chấm C++ cần image
+có `g++`; bot/game vẫn chạy khi thiếu compiler. Không cần Docker, quyền root,
+`systemd` hay `prlimit` cho backend local. Upload dự án vào `/home/container`, sao cho
 `main.py` và `requirements.txt` ở ngay thư mục gốc. Có thể dùng tab Files
 hoặc SFTP; không upload `.venv` từ máy cá nhân. Trong tab Startup, đặt
-`PY FILE` là `main.py`. KataBump sẽ tự
-chạy `pip install -r requirements.txt` trước khi chạy bot.
+`PY FILE` là `main.py`. KataBump hỗ trợ cài dependencies từ `requirements.txt`;
+`main.py` mới còn tự kiểm tra/cài các gói thiếu trước khi import bot, tránh lỗi
+`No module named 'dotenv'` nếu panel chưa cài. Cần upload cả `bootstrap.py` và
+`paths.py`, không chỉ riêng `main.py`.
 
-Đặt `TELEGRAM_BOT_TOKEN` trong Environment Variables của panel hoặc trong
-file `.env` ở `/home/container`. Hiện bạn chỉ dùng Telegram, nên để trống
-`DISCORD_TOKEN`. Điền `TELEGRAM_ADMIN_IDS` bằng Telegram user ID dạng số
+Đặt token trong Environment Variables của panel hoặc file `.env` ở
+`/home/container`: `TELEGRAM_BOT_TOKEN`, `DISCORD_TOKEN`, `ZALO_BOT_TOKEN`.
+Điền bot muốn bật và để trống các bot khác. Điền `TELEGRAM_ADMIN_IDS` bằng user ID dạng số
 của người được tạo/sửa bài; nhiều ID ngăn bằng dấu phẩy. Nếu để trống,
 không ai có quyền sửa bài. `TELEGRAM_NOTIFY_CHAT_ID` và
 `MAGOJ_WEBAPP_URL` là tùy chọn. URL Web App phải là HTTPS công khai trỏ đến
@@ -24,12 +30,13 @@ thư mục chứa `submit.html`; chỉ điền URL gốc, không thêm tên file
 
 Sau khi upload, bấm Start ở tab Console và đọc log khởi động. Chỉ chạy một
 instance với mỗi Telegram token; hai instance dùng cùng token sẽ gây
-`telegram.error.Conflict`. Gói miễn phí phải gia hạn mỗi 4 ngày. Khi cập
-nhật, upload đè file mã nguồn rồi Restart; giữ nguyên `data.sqlite3`. Gói
-hiện tại có 308 MB RAM, 716 MB disk và 25% CPU; không lưu file bài nộp lâu
+`telegram.error.Conflict`. Kiểm tra chu kỳ gia hạn và tài nguyên theo gói đang
+dùng. Khi cập nhật, Stop, sao lưu dữ liệu, upload mã nguồn rồi Restart; giữ nguyên
+`.env`, `data.json` và `data.sqlite3`. Bot không lưu file bài nộp lâu
 dài. Các file tạm do trình chấm tạo được xóa sau mỗi lượt.
 Nếu panel cho mở shell, có thể chạy `python3 main.py --check` để kiểm tra
-cấu hình mà không đăng nhập Telegram hoặc in giá trị token. Khi bot offline,
+cấu hình mà không đăng nhập bot hoặc in giá trị token. `python3 main.py --check-runner`
+kiểm tra thêm biên dịch và chạy C++. Khi bot offline,
 kiểm tra hạn gia hạn, log Console, `PY FILE`, token và việc có instance thứ
 hai đang dùng cùng token.
 
@@ -64,7 +71,8 @@ trợ container.
 
 ## Dữ liệu và sao lưu
 
-Lần chạy đầu, bot nhập toàn bộ `data.json` cũ vào SQLite `data.sqlite3` (bao
+Lần chạy đầu, bot nhập toàn bộ `data.json` cũ (hoặc `examples/seed-data.json` trong
+gói ZIP nếu chưa có file ở gốc) vào SQLite `data.sqlite3` (bao
 gồm 19 bài trong repository). Tệp JSON gốc vẫn được giữ để đối chiếu. Các
 lần sau, SQLite là nguồn dữ liệu chính; bot không ghi ngược vào JSON.
 Trước lần chạy đầu sau nâng cấp, sao lưu và giữ bản `data.json` đang dùng
@@ -94,6 +102,53 @@ Admin dùng `/setlimit tên_bài số_test giây RAM_MiB` trong khoảng 1–10 
 Các bài ẩn không hiện trong danh sách, đề hoặc luồng nộp của học sinh.
 
 ## Lệnh
+
+### Zalo Bot (chạy local bằng long polling)
+
+Cài dependencies bằng `python -m pip install -r requirements.txt`. Tạo Zalo Bot
+trong Zalo Bot Creator và chép token vào `ZALO_BOT_TOKEN` trong `.env` (hoặc biến
+môi trường của máy chủ). Điền các Zalo user ID được phép quản trị, ngăn bằng dấu
+phẩy, vào `ZALO_ADMIN_IDS`. Gửi `/id` trong chat riêng để xem ID của mình; nếu
+để trống danh sách thì mọi lệnh quản trị đều bị từ chối. Không đưa `.env` vào Git.
+Chạy `python main.py`; khi không có `ZALO_BOT_TOKEN`, Zalo được bỏ qua và các bot
+còn lại tiếp tục chạy. Cả ba token có thể được cấu hình cùng lúc.
+Polling và quản lý lệnh chạy trên Windows; runner C++ hiện dùng POSIX resource
+limits, nên cần máy chấm Linux để biên dịch/chạy bài an toàn. Trên Windows
+runner trả lỗi môi trường thay vì chạy C++ không có giới hạn tài nguyên.
+
+Lệnh người dùng: `/start`, `/help` hoặc `/guide`, `/problems`, `/show <tên>`,
+`/input <dữ liệu>`, `/run <code C++>`, `/submit <tên> <code C++>`, `/id`.
+Bot cũng nạp game từ các thư mục `zalo.*` ở gốc dự án. Xem
+[hướng dẫn viết game](ZALO_GAME_GUIDE.md) và thư mục mẫu `zalo.doan_so`.
+Gửi `/games` để chọn trò, `/help tictactoe` hoặc `/help doan_so` để xem hướng dẫn.
+Tic Tac Toe có `/carohelp`, `/banco`, `/choibot de|vua|kho`, `/choilai`,
+`/dauhang` và `/diemcaro`. Menu chính ở `/help`; lệnh học C++ ở `/help cpp`.
+Để gửi code dài trong chat riêng, dùng `/run` hoặc `/submit <tên>` không kèm code,
+gửi từng phần rồi `/done`; `/cancel` hủy phiên. Phiên hết hạn sau 15 phút và
+giới hạn code là 64 KiB. Input chạy thử được lưu riêng theo Zalo user ID trong
+cùng SQLite với hai bot khác. Lệnh quản trị: `/create`, `/question`, `/solution`,
+`/gen`, `/checker`, `/category`, `/admin_guide`, `/how`.
+
+Zalo chỉ gửi một update mỗi lần gọi `getUpdates`; adapter dùng API bất đồng bộ
+`Bot.get_update()` của `python-zalo-bot==0.1.9`, không dùng offset. Nếu token đã
+cấu hình webhook, polling sẽ không nhận sự kiện; adapter không tự xóa webhook.
+Khi tính năng nhóm được cấp quyền (`getMe.can_join_groups`), bot chỉ xử lý các
+tin văn bản được Zalo chuyển tới khi có mention hoặc reply, và chỉ nhận lệnh
+bắt đầu bằng `/`. Gửi code nhiều phần trong chat riêng vì Zalo không bảo đảm
+chuyển mọi tin nhắn trong nhóm. Tính năng nhóm hiện được Zalo ghi là thử nghiệm.
+
+SDK hiện có phương thức webhook quản lý vòng lặp đồng bộ bằng `asyncio.run()`;
+adapter không gọi chúng. Mọi tin gửi dùng `Bot.send_message()` dạng văn bản thuần
+và được chia dưới 1.850 ký tự, thấp hơn giới hạn 2.000 ký tự của API.
+Chạy C++ với `MAGOJ_JUDGE_BACKEND=local` vẫn có rủi ro truy cập filesystem/mạng
+như mô tả ở phần bảo mật bên trên; dùng Docker worker khi có người dùng không
+tin cậy.
+
+Tham khảo [SDK Python](https://pypi.org/project/python-zalo-bot/),
+[getUpdates](https://docs.zaloplatforms.com/docs/BOT/apis/getUpdates),
+[sendMessage](https://docs.zaloplatforms.com/docs/BOT/apis/sendMessage),
+[Webhook](https://docs.zaloplatforms.com/docs/BOT/webhook) và
+[tương tác nhóm](https://bot.zapps.me/docs/build-bot-interaction-with-group/).
 
 | Chức năng | Discord | Telegram |
 | --- | --- | --- |

@@ -9,8 +9,9 @@ from dotenv import load_dotenv
 import core
 import access
 import storage
+from paths import PROJECT_ROOT
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 TOKEN = os.getenv("DISCORD_TOKEN")
 NOTIFY_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFY_CHANNEL_ID", "0") or 0)
 
